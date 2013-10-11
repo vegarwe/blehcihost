@@ -1,0 +1,12 @@
+- device interface for sending and receiving data
+- uart interface
+- All HCI commands
+- All HCI events
+- Gap
+- Att
+- L2Cap
+- Smp
+-
+- buffers available module
+- connecitons database
+- gatt server module
