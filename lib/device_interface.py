@@ -38,14 +38,27 @@ class DeviceInterface(threading.Thread):
 
         self.driver.close()
 
-    def write_cmd(self, cmd):
+    def _write(self, pkt):
         if not self.keep_running:
             return
-        self.driver.write(cmd.serialize())
+        self.driver.write(pkt.serialize())
+
+    def write_data(self, conn_handle, data):
+        self._write(hci.HciDataPkt(conn_handle, hci.L2CapPkt(data)))
         while True:
-            #if cmd.__class__ == hci.HciLeSetScanEnable:
-            #    self.log.debug('cmd %s, no cmd response', cmd.__class__.__name__)
-            #    return # TODO: Why do we get no CommandComplete or CommandStatus for this?
+            pkt = self.wait_for_pkt()
+
+            if pkt.__class__ == hci.HciNumCompletePackets:
+                self.log.debug('data %s, pkt %r', data.__class__.__name__, pkt)
+                return pkt
+            if pkt == None:
+                self.log.info('data %s, timeout waiting for event', data.__class__.__name__)
+                return pkt
+            self.log.info('data %s, discarding unexpcted event %r', data.__class__.__name__, pkt)
+
+    def write_cmd(self, cmd):
+        self._write(cmd)
+        while True:
             #if cmd.__class__ == hci.HciLeCreateConnection:
             #    self.log.debug('cmd %s, no cmd response', cmd.__class__.__name__)
             #    return # TODO: Why do we get no CommandComplete or CommandStatus for this?
