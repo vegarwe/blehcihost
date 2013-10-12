@@ -1,18 +1,20 @@
+#!/cygdrive/c/Python27/python.exe
+
+import sys
+#sys.path.append('C:\\Users\\vegarwe\\Dropbox\\vegarwe\\devel\\python_stack')
+sys.path.append('..')
+
 import logging
 
-from lib.serial_driver import SerialHci
-from lib.device_interface import DeviceInterface
-from lib import hci
+from blehcihost import SerialHci
+from blehcihost import DeviceInterface
+from blehcihost import hci
 
 class App(object):
     def __init__(self):
         self.log = logging.getLogger('main')
 
     def main(self, dev):
-        data = '\x18\x11\x02\x00 \x13\x00\x0f\x00\x04\x00\x0bXLR2_2_TempLog'
-        print repr(hci.HciDataPkt.deserialize(data))
-        return
-
         # Setup
         dev.write_cmd(hci.HciReset())
         dev.write_cmd(hci.HciNrfGetVersionInfo())
@@ -48,6 +50,18 @@ class App(object):
 
 if __name__ == '__main__':
     #from optparse import OptionParser
+
+    #pkt = hci.HciReset()
+    #print '%s' % (pkt)
+    #pkt = hci.HciLeCreateConnection('\x10\x00', peer_addr='\xba\x12\xc5\x9e\xa8\xe5')
+    #print '%s' % (pkt)
+    #pkt = hci.AttReadRequest(handle='\x03\x00')
+    #print '%s - %r' % (pkt, pkt.serialize())
+
+    data = '\x18\x11\x02\x00 \x13\x00\x0f\x00\x04\x00\x0bXLR2_2_TempLog'
+    print 'data %r' % data
+    print '%s' % (hci.event_factory(data))
+    raise SystemExit(1)
 
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
