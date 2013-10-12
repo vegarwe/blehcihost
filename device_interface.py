@@ -2,7 +2,7 @@ import threading
 import logging
 import Queue
 
-from lib import hci
+import hci
 
 class DeviceInterface(threading.Thread):
     def __init__(self, driver, pkt_handler=None):
