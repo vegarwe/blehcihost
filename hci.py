@@ -2,19 +2,34 @@
 # BLUETOOTH SPECIFICATION Version 4.0 [Vol 2] page 15 of 1114
 # BLUETOOTH SPECIFICATION Version 4.0 [Vol 2] page 408 of 1114
 
+def _parse_fields(class_descr, args, argv):
+    # TODO: Verify size of field
+    fields =  []
+    for i in range(len(class_descr)):
+        attr = class_descr[i][0]
+        if i < len(args):
+            fields.append((attr, args[i]))
+        elif attr in argv:
+            fields.append((attr, argv[attr]))
+        else:
+            if class_descr[i][2] == None:
+                raise TypeError("__init__() takes at least %s arguments (%s given)" %
+                        (1+len(class_descr), 1 + len(args) + len(argv)))
+            fields.append((attr, class_descr[i][2]))
+    return fields
+
 class HciPkt(object):
     def __init__(self, uart_type):
         self.uart_type = uart_type
 
 ###################### COMMANDS ######################
 class HciCommand(HciPkt):
-    def __init__(self, op_code, fields=None):
+    op_code = '\x00\x00' # TODO: Find invalid op_code to put here
+    class_descr = []     # TODO: Is it OK to access this static array with self.class_descr in init?
+
+    def __init__(self, *args, **argv):
         HciPkt.__init__(self, '\x01')
-        self.op_code   = op_code
-        if fields == None:
-            self.fields = []
-        else:
-            self.fields = fields
+        self.fields = _parse_fields(self.class_descr, args, argv)
 
     def serialize(self):
         data = ''
@@ -23,130 +38,252 @@ class HciCommand(HciPkt):
         length = chr(len(data))
         return ''.join([self.uart_type, self.op_code, length, data])
 
+    def __repr__(self):
+        if len(self.fields) == 0:
+            return '%s(op_code=%r)' % ( self.__class__.__name__, self.op_code)
+        else:
+            return '%s(op_code=%r, %s)' % (
+                    self.__class__.__name__, self.op_code,
+                    ', '.join(['%s=%r' % (i[0], i[1]) for i in self.fields]))
+
+###################### DATA ##########################
+# BLUETOOTH SPECIFICATION Version 4.0 [Vol 2] page 429 of 1114
+class HciDataPkt(HciPkt):
+    def __init__(self, conn_handle, payload_pkt, pb_flag='\x00', bc_flag='\x00'):
+        HciPkt.__init__(self, '\x02')
+        self.conn_handle = conn_handle
+        self.payload_pkt = payload_pkt
+        self.pb_flag     = pb_flag
+        self.bc_flag     = bc_flag
+
+    def serialize(self):
+        payload = self.payload_pkt.serialize()
+        length = len(payload)
+        # TODO: Handle pb_flag and bc_flag !!!!1111oneoeneone
+        # TODO: Handle length field with 16 bits
+        return ''.join([self.uart_type, self.conn_handle, chr(length), '\x00', payload])
+
+    @staticmethod
+    def deserialize(data):
+        hci_data = data[2:9]
+        print 'todo: hci_data %r' % (hci_data)
+        return HciDataPkt('\xff\xfe', L2CapPkt.deserialize(data[9:]))
+
+    def __repr__(self):
+        return '%s(conn_handle=%r, %r)' % (self.__class__.__name__, self.conn_handle, self.payload_pkt)
+
+###################### L2CAP #########################
+class L2CapPkt(object):
+    def __init__(self, payload_pkt):
+        self.payload_pkt = payload_pkt
+        if   isinstance(payload_pkt, AttPkt):            self.channel_id = '\x04\x00'
+        #elif isinstance(payload_pkt, L2CapSignalingPkt): self.channel_id = '\x05\x00'
+        #elif isinstance(payload_pkt, SmpPkt):            self.channel_id = '\x06\x00'
+        else:                                            self.channel_id = '\x00\x00'
+
+    def serialize(self):
+        payload = self.payload_pkt.serialize()
+        length = len(payload)
+        # TODO: Handle length field with 16 bits
+        return ''.join([chr(length), '\x00', self.channel_id, payload])
+
+    @staticmethod
+    def deserialize(data):
+        if data[0:2] == '\x04\x00':
+            return L2CapPkt(AttResponse.deserialize(data[2:]))
+
+    def __repr__(self):
+        return '%s(channel_id=%r, %r)' % (self.__class__.__name__, self.channel_id, self.payload_pkt)
+
+###################### ATT ###########################
+ATT_MTU = 23
+class AttPkt(object):
+    op_code = '\x00' # TODO: Find invalid op_code to put here
+    class_descr = [] # TODO: Is it OK to access this static array with self.class_descr in init?
+
+    def __init__(self, *args, **argv):
+        self.fields = _parse_fields(self.class_descr, args, argv)
+
+    def serialize(self):
+        data = ''
+        for field in self.fields:
+            data += field[1]
+        return ''.join([self.op_code, data])
+
+    def __repr__(self):
+        if len(self.fields) == 0:
+            return '%s(op_code=%r)' % ( self.__class__.__name__, self.op_code)
+        else:
+            return '%s(op_code=%r, %s)' % (
+                    self.__class__.__name__, self.op_code,
+                    ', '.join(['%s=%r' % (i[0], i[1]) for i in self.fields]))
+
+class AttRequest(AttPkt):
+    pass
+
+class AttResponse(AttPkt):
+    @staticmethod
+    def deserialize(data):
+        if data[0] == '\x0b':
+            return AttReadResponse.deserialize(data[1:])
+
+#class Attribute:
+#    def __init__(self, handle, uuid, value=None):
+#        self.handle = handle
+#        self.uuid = uuid
+#        self.value = []
+#        if value != None:
+#            for v in value:
+#                self.value.append(int(v))
+#
+#    def __repr__(self):
+#        if self.handle == None:
+#            handle = 'None'
+#        else:
+#            handle = "0x%04x" % self.handle
+#        if self.uuid == None:
+#            uuid = 'None'
+#        else:
+#            uuid = "0x%04x" % self.uuid
+#        value = "".join([chr(i) for i in self.value])
+#        return "%s(handle=%s, uuid=%s, value=%s)" % (self.__class__.__name__, handle, uuid, repr(value))
+
+###################### EVENTS ########################
+class HciEvent(HciPkt):
+    def __init__(self, event_code, fields):
+        HciPkt.__init__(self, '\x04')
+        self.event_code = event_code
+        self.fields = fields
+
+    def __getattr__(self, name):
+        for field in self.fields:
+            if field[0] == name:
+                return field[1]
+        raise AttributeError("'%s' object has no attribute '%s'" % (self.__class__.__name__, name))
+
+    def __repr__(self):
+        return '%s(event_code: %r, %s)' % (
+                self.__class__.__name__, self.event_code,
+                ', '.join(['%s: %r' % (i[0], i[1]) for i in self.fields]))
+
+def event_factory(data):
+    if data[2] == '\x04':
+        if data[3] == '\x05': return HciDisconnectionComplete(data)
+        #if data[3] == '\x08': return HciEncryptionChange(data)
+        if data[3] == '\x0C': return HciReadRemoteVersionInformationComplete(data)
+        if data[3] == '\x0E': return HciCommandComplete(data)
+        if data[3] == '\x0F': return HciCommandStatus(data)
+        if data[3] == '\x13': return HciNumCompletePackets(data)
+        #if data[3] == '\x30': return HciEncryptionKeyRefreshComplete(data)
+
+        if data[3] == '\x3e':
+            if data[5] == '\x01': return HciLeConnectionComplete(data)
+            if data[5] == '\x02': return HciLeAdvertisingReport(data)
+            #if data[5] == '\x03': return HciLeConnectionUpdateComplete(data)
+            #if data[5] == '\x04': return HciLeReadRemoteUsedFeaturesComplete(data)
+            #if data[5] == '\x05': return HciLeLongTermKeyRequest(data)
+    if data[2] == '\x02':
+        return HciDataPkt.deserialize(data)
+        pass
+    return 'Not decoded yet'
+
+
+###################### COMMANDS ######################
 class HciReset(HciCommand):
-    def __init__(self):
-        HciCommand.__init__(self, '\x03\x0c')
+    op_code = '\x03\x0c'
 
 class HciDisconnect(HciCommand):
-    def __init__(self, conn_handle, reason='\x13'):
-        fields = [  ['conn_handle', conn_handle, 2],
-                    ['reason'     , reason,      1] ]
-        HciCommand.__init__(self, '\x06\x04', fields)
+    op_code = '\x06\x04'
+    class_descr = [ ['conn_handle', 2, None],
+                    ['reason'     , 1, '\x13'] ]
 
 class HciReadRemoteVersionInformation(HciCommand):
-    def __init__(self, conn_handle):
-        fields = [  ['conn_handle' , conn_handle,  2] ]
-        HciCommand.__init__(self, '\x1d\x04', fields)
+    op_code = '\x1d\x04'
+    class_descr = [ ['conn_handle', 2, '\xff\xff'] ]
 
 class HciReadPublicDeviceAddress(HciCommand):
-    def __init__(self):
-        HciCommand.__init__(self, '\x09\x10')
+    op_code = '\x09\x10'
 
 class HciLeReadBufferSize(HciCommand):
-    def __init__(self):
-        HciCommand.__init__(self, '\x02\x20')
+    op_code = '\x02\x20'
 
 class HciLeReadLocalSupportedFeatures(HciCommand):
-    def __init__(self):
-        HciCommand.__init__(self, '\x03\x20')
+    op_code = '\x03\x20'
 
 class HciLeSetRandomAddress(HciCommand):
-    def __init__(self, addr):
-        fields = [  ['addr' , addr,  6] ]
-        HciCommand.__init__(self, '\x05\x20', fields)
+    op_code = '\x05\x20'
+    class_descr = [ ['addr', 6, None] ]
 
 class HciLeSetAdvertisingParameters(HciCommand):
-    def __init__(self, adv_interval_min='\x00\x08', adv_interval_max='\x00\x08',
-            adv_type='\x00', own_addr_type='\x01', direct_addr_type='\x00',
-            direct_addr='\x00\x00\x00\x00\x00\x00', adv_channel_map='\x03', adv_filter_policy='\x00'):
-        fields = [  ['adv_interval_min' , adv_interval_min,  2],
-                    ['adv_interval_max' , adv_interval_max,  2],
-                    ['adv_type'         , adv_type,          1],
-                    ['own_addr_type'    , own_addr_type,     1],
-                    ['direct_addr_type' , direct_addr_type,  1],
-                    ['direct_addr'      , direct_addr,       6],
-                    ['adv_channel_map'  , adv_channel_map,   1],
-                    ['adv_filter_policy', adv_filter_policy, 1] ]
-        HciCommand.__init__(self, '\x06\x20', fields)
+    op_code = '\x06\x20'
+    class_descr = [ ['adv_interval_min' , 2, '\x00\x08'],
+                    ['adv_interval_max' , 2, '\x00\x08'],
+                    ['adv_type'         , 1, '\x00'],
+                    ['own_addr_type'    , 1, '\x01'],
+                    ['direct_addr_type' , 1, '\x00'],
+                    ['direct_addr'      , 6, '\x00\x00\x00\x00\x00\x00'],
+                    ['adv_channel_map'  , 1, '\x03'],
+                    ['adv_filter_policy', 1, '\x00'] ]
 
 class HciLeSetAdvertisingEnable(HciCommand):
-    def __init__(self, adv_enable='\x00'):
-        HciCommand.__init__(self, '\x0a\x20', data)
-        #self.length    = '\x01'
+    op_code = '\x0a\x20'
+    class_descr = [ ['adv_enable' , 1, '\x00'] ]
 
 class HciLeSetScanParametersCommand(HciCommand):
-    def __init__(self, scan_type='\x00', scan_interval='\x10\x00', scan_window='\x20\x00',
-            own_addr_type='\x00', scan_filter_policy='\x00'):
-        fields = [  ['scan_type'         , scan_type         , 1],
-                    ['scan_interval'     , scan_interval     , 2],
-                    ['scan_window'       , scan_window       , 2],
-                    ['own_addr_type'     , own_addr_type     , 1],
-                    ['scan_filter_policy', scan_filter_policy, 1] ]
-        HciCommand.__init__(self, '\x0b\x20', fields)
+    op_code = '\x0b\x20'
+    class_descr = [ ['scan_type'         , 1, '\x00'],
+                    ['scan_interval'     , 2, '\x10\x00'],
+                    ['scan_window'       , 2, '\x20\x00'],
+                    ['own_addr_type'     , 1, '\x00'],
+                    ['scan_filter_policy', 1, '\x00'] ]
 
 class HciLeSetScanEnable(HciCommand):
-    def __init__(self, scan_enable='\x00', filter_duplicates='\x00'):
-        fields = [  ['scan_enable'      , scan_enable      , 1],
-                    ['filter_duplicates', filter_duplicates, 1] ]
-        HciCommand.__init__(self, '\x0c\x20', fields)
+    op_code = '\x0c\x20'
+    class_descr = [ ['scan_enable'      , 1, '\x00'],
+                    ['filter_duplicates', 1, '\x00'] ]
 
 class HciLeCreateConnection(HciCommand):
-    def __init__(self, scan_interval='\x10\x00', scan_window='\x10\x00', initiator_filter_policy='\x00',
-            peer_addr_type='\x01', peer_addr='\x00\x00\x00\x00\x00', own_addr_type='\x00', 
-            conn_interval_min='\x50\x00', conn_interval_max='\x50\x00', conn_latency='\x00\x00',
-            supervision_timeout='\x50\x02', min_ce_length=None, max_ce_length=None):
-        if min_ce_length == None: min_ce_length = conn_interval_min
-        if max_ce_length == None: max_ce_length = conn_interval_max
-        fields = [  ['scan_interval',           scan_interval,           2],
-                    ['scan_window',             scan_window,             2],
-                    ['initiator_filter_policy', initiator_filter_policy, 1],
-                    ['peer_addr_type',          peer_addr_type,          1],
-                    ['peer_addr',               peer_addr,               6],
-                    ['own_addr_type',           own_addr_type,           1],
-                    ['conn_interval_min',       conn_interval_min,       2],
-                    ['conn_interval_max',       conn_interval_max,       2],
-                    ['conn_latency',            conn_latency,            1],
-                    ['supervision_timeout',     supervision_timeout,     2],
-                    ['min_ce_length',           min_ce_length,           2],
-                    ['max_ce_length',           max_ce_length,           2] ]
-        HciCommand.__init__(self, '\x0d\x20', fields)
+    op_code = '\x0d\x20'
+    class_descr = [ ['scan_interval',           2, '\x10\x00'],
+                    ['scan_window',             2, '\x10\x00'],
+                    ['initiator_filter_policy', 1, '\x00'],
+                    ['peer_addr_type',          1, '\x01'],
+                    ['peer_addr',               6, '\x00\x00\x00\x00\x00'],
+                    ['own_addr_type',           1, '\x00'],
+                    ['conn_interval_min',       2, '\x50\x00'],
+                    ['conn_interval_max',       2, '\x50\x00'],
+                    ['conn_latency',            1, '\x00\x00'],
+                    ['supervision_timeout',     2, '\x50\x02'],
+                    ['min_ce_length',           2, '\x50\x00'],  # TODO: What is min_ce_length?
+                    ['max_ce_length',           2, '\x50\x00'] ] # TODO: What is max_ce_length?
 
 
 class HciLeCreateConnectionCancel(HciCommand):
-    def __init__(self):
-        HciCommand.__init__(self, '\x0e\x20')
+    op_code = '\x0e\x20'
 
 class HciLeReadWhiteListSize(HciCommand):
-    def __init__(self):
-        HciCommand.__init__(self, '\x0f\x20')
+    op_code = '\x0f\x20'
 
 class HciLeClearWhiteList(HciCommand):
-    def __init__(self):
-        HciCommand.__init__(self, '\x10\x20')
+    op_code = '\x10\x20'
 
 class HciLeAddDeviceToWhiteList(HciCommand):
-    def __init__(self, addr_type='\x00', addr='\x00\x00\x00\x00\x00\x00'):
-        fields = [  ['addr_type', addr_type, 1],
-                    ['addr',      addr,      6] ]
-        HciCommand.__init__(self, '\x11\x20', fields)
+    op_code = '\x11\x20'
+    class_descr = [ ['addr_type', 1, '\x00'],
+                    ['addr',      6, '\x00\x00\x00\x00\x00\x00'] ]
 
 class HciLeConnectionUpdate(HciCommand):
-    def __init__(self, connection_handle='\x00\x00', conn_interval_min='\x50\x00', conn_interval_max='\x50\x00',
-            conn_latency='\x00\x00', supervision_timeout='\x50\x02', min_ce_length=None, max_ce_length=None):
-        if min_ce_length == None: min_ce_length = conn_interval_min
-        if max_ce_length == None: max_ce_length = conn_interval_max
-        fields = [  ['connection_handle',    connection_handle,   2],
-                    ['conn_interval_min',    conn_interval_min,   2],
-                    ['conn_interval_max',    conn_interval_max,   2],
-                    ['conn_latency',         conn_latency,        2],
-                    ['supervision_timeout',  supervision_timeout, 2],
-                    ['min_ce_length',        min_ce_length,       2],
-                    ['max_ce_length',        max_ce_length,       2] ]
-        HciCommand.__init__(self, '\x13\x20', fields)
+    op_code = '\x13\x20'
+    class_descr = [ ['connection_handle',   2, '\x00\x00'],
+                    ['conn_interval_min',   2, '\x50\x00'],
+                    ['conn_interval_max',   2, '\x50\x00'],
+                    ['conn_latency',        2, '\x00\x00'],
+                    ['supervision_timeout', 2, '\x50\x02'],
+                    ['min_ce_length',       2, '\x50\x00'],
+                    ['max_ce_length',       2, '\x50\x00'] ]
 
 class HciNrfGetVersionInfo(HciCommand):
-    def __init__(self):
-        HciCommand.__init__(self, '\x06\xfc')
+    op_code = '\x06\xfc'
 
 # - HciReset:                            {'OpCode':030C,'Length':0},
 # - HciDisconnect:                       {'OpCode':0604,'Length':3},
@@ -179,28 +316,26 @@ class HciNrfGetVersionInfo(HciCommand):
 # - HciNrfGetVersionInfo:                {'OpCode':06FC,'Length':0},
 
 ###################### DATA ##########################
-# BLUETOOTH SPECIFICATION Version 4.0 [Vol 2] page 429 of 1114
-class HciDataPkt(HciPkt):
-    def __init__(self, conn_handle, payload_pkt, pb_flag='\x00', bc_flag='\x00'):
-        HciPkt.__init__(self, '\x02')
-        self.conn_handle = conn_handle
-        self.payload_pkt = payload_pkt
-        self.pb_flag     = pb_flag
-        self.bc_flag     = bc_flag
 
-    def serialize(self):
-        payload = self.payload_pkt.serialize()
-        length = len(payload)
-        # TODO: Handle pb_flag and bc_flag !!!!1111oneoeneone
-        # TODO: Handle length field with 16 bits
-        return ''.join([self.uart_type, self.conn_handle, chr(length), '\x00', payload])
+###################### L2CAP #########################
+
+###################### ATT ###########################
+class AttReadRequest(AttRequest):
+    op_code = '\x0a'
+    class_descr = [ ['handle', 1, None] ]
+
+class AttReadResponse(AttResponse):
+    op_code = '\x0b'
+    class_descr = [ ['value', (1, ATT_MTU) , None] ]
 
     @staticmethod
     def deserialize(data):
-        return HciDataPkt('\xff\xfe', L2CapPkt.deserialize(data))
+        return AttReadResponse(data)
 
-    def __repr__(self):
-        return '%s(conn_handle=%r, %r)' % (self.__class__.__name__, self.conn_handle, self.payload_pkt)
+class AttWriteRequest(AttRequest):
+    op_code = '\x12'
+    class_descr = [ ['handle',            2, None],
+                    ['value',  (1, ATT_MTU), None] ]
 
 #   'ERROR_RESPONSE'                :{'Opcode':0x01,'Pkt':AttErrorResponse,'minSize':5, 'maxSize':5},
 #   ## Server Configuration
@@ -214,8 +349,8 @@ class HciDataPkt(HciPkt):
 #   ## Read
 #   'READ_BY_TYPE_REQUEST'          :{'Opcode':0x08,'Pkt':AttReadByTypeRequest,'minSize':7, 'maxSize':21},
 #   'READ_BY_TYPE_RESPONSE'         :{'Opcode':0x09,'Pkt':AttReadByTypeResponse,'minSize':4, 'maxSize':ATT_MTU},
-#   'READ_REQUEST'                  :{'Opcode':0x0A,'Pkt':AttReadRequest,'minSize':3, 'maxSize':3},
-#   'READ_RESPONSE'                 :{'Opcode':0x0B,'Pkt':AttReadResponse,'minSize':1, 'maxSize':ATT_MTU},
+# + 'READ_REQUEST'                  :{'Opcode':0x0A,'Pkt':AttReadRequest,'minSize':3, 'maxSize':3},
+# + 'READ_RESPONSE'                 :{'Opcode':0x0B,'Pkt':AttReadResponse,'minSize':1, 'maxSize':ATT_MTU},
 #   'READ_BLOB_REQUEST'             :{'Opcode':0x0C,'Pkt':AttReadBlobRequest,'minSize':5, 'maxSize':5},
 #   'READ_BLOB_RESPONSE'            :{'Opcode':0x0D,'Pkt':AttReadBlobResponse,'minSize':1, 'maxSize':ATT_MTU},
 #   'READ_MULTIPLE_REQUEST'         :{'Opcode':0x0E,'Pkt':AttReadMultipleRequest,'minSize':5, 'maxSize':ATT_MTU},
@@ -225,7 +360,7 @@ class HciDataPkt(HciPkt):
 #   ## Write
 #   'WRITE_COMMAND'                 :{'Opcode':0x52,'Pkt':AttWriteCommand,'minSize':3, 'maxSize':ATT_MTU},
 #   'SIGNED_WRITE_COMMAND'          :{'Opcode':0xD2,'Pkt':AttSignedWriteCommand,'minSize':3, 'maxSize':ATT_MTU},
-#   'WRITE_REQUEST'                 :{'Opcode':0x12,'Pkt':AttWriteRequest,'minSize':3, 'maxSize':ATT_MTU},
+# - 'WRITE_REQUEST'                 :{'Opcode':0x12,'Pkt':AttWriteRequest,'minSize':3, 'maxSize':ATT_MTU},
 #   'WRITE_RESPONSE'                :{'Opcode':0x13,'Pkt':AttWriteResponse,'minSize':1, 'maxSize':1},
 #   'PREPARE_WRITE_REQUEST'         :{'Opcode':0x16,'Pkt':AttPrepareWriteRequest,'minSize':5, 'maxSize':ATT_MTU},
 #   'PREPARE_WRITE_RESPONSE'        :{'Opcode':0x17,'Pkt':AttPrepareWriteResponse,'minSize':5, 'maxSize':ATT_MTU},
@@ -236,113 +371,8 @@ class HciDataPkt(HciPkt):
 #   'HANDLE_VALUE_INDICATION'       :{'Opcode':0x1D,'Pkt':AttHandleValueIndication,'minSize':3, 'maxSize':ATT_MTU},
 #   'HANDLE_VALUE_CONFIRMATION'     :{'Opcode':0x1E,'Pkt':AttHandleValueConfirmation,'minSize':1, 'maxSize':1},
 
-###################### L2CAP #########################
-class L2CapPkt(object):
-    def __init__(self, payload_pkt):
-        self.payload_pkt = payload_pkt
-        if   isinstance(payload_pkt, AttPkt):            self.channel_id = '\x04\x00'
-        #elif isinstance(payload_pkt, L2CapSignalingPkt): self.channel_id = '\x05\x00'
-        #elif isinstance(payload_pkt, SmpPkt):            self.channel_id = '\x06\x00'
-
-    def serialize(self):
-        payload = self.payload_pkt.serialize()
-        length = len(payload)
-        # TODO: Handle length field with 16 bits
-        return ''.join([chr(length), '\x00', self.channel_id, payload])
-
-    @staticmethod
-    def deserialize(data):
-        return L2CapPkt(AttRequest('', ''))
-
-    def __repr__(self):
-        return '%s(channel_id=%r, %r)' % (self.__class__.__name__, self.channel_id, self.payload_pkt)
-
-###################### ATT request ###################
-class AttPkt(object):
-    pass
-
-class AttRequest(AttPkt):
-    def __init__(self, op_code, fields):
-        self.op_code = op_code
-        self.fields  = fields
-
-    def serialize(self):
-        data = ''
-        for field in self.fields:
-            data += field[1] # TODO: Verify size of field
-        return ''.join([self.op_code, data])
-    
-    def __repr__(self):
-        return '%s(op_code: %r, %s)' % (
-                self.__class__.__name__, self.op_code,
-                ', '.join(['%s: %r' % (i[0], i[1]) for i in self.fields]))
-
-class AttReadRequest(AttRequest):
-    def __init__(self, handle):
-        fields = [  ['handle', handle, 1] ]
-        AttRequest.__init__(self, '\x0A', fields)
-
-###################### ATT responses #################
-class Attribute:
-    def __init__(self, handle, uuid, value=None):
-        self.handle = handle
-        self.uuid = uuid
-        self.value = []
-        if value != None:
-            for v in value:
-                self.value.append(int(v))
-
-    def __repr__(self):
-        if self.handle == None:
-            handle = 'None'
-        else:
-            handle = "0x%04x" % self.handle
-        if self.uuid == None:
-            uuid = 'None'
-        else:
-            uuid = "0x%04x" % self.uuid
-        value = "".join([chr(i) for i in self.value])
-        return "%s(handle=%s, uuid=%s, value=%s)" % (self.__class__.__name__, handle, uuid, repr(value))
-
-#    'READ_RESPONSE'                 :{'Opcode':0x0B,'Pkt':AttReadResponse,'minSize':1, 'maxSize':ATT_MTU},
-#class AttReadResponse(AttResponse):
-#    def create(self, Attributes = None):
-#        self.Attributes = Attributes
-#    
-#    def build(self):
-#        self.Content = [self.Opcode] + self.Attributes.value[:ATT_MTU]
-#    
-#    def parse(self, packet):
-#        value = self.Content[1:]
-#        self.Attributes = Attribute(None,None,value)
-#
-#    def __repr__(self):
-#        return "%s(Attributes=%s)" % (self.__class__.__name__, repr(self.Attributes))
-#
-#    def __init__(self, pkt):
-#        attribute = Attribute(pkt[3:])
-#        fields = [  ['attrs',            [attribute],     1] ]
-#        HciEvent.__init__(self, '\x01', fields)
-
 
 ###################### EVENTS ########################
-class HciEvent(HciPkt):
-    def __init__(self, event_code, fields):
-        HciPkt.__init__(self, '\x04')
-        self.event_code = event_code
-        self.fields = fields
-
-    def __getattr__(self, name):
-        for field in self.fields:
-            if field[0] == name:
-                return field[1]
-        raise AttributeError("'%s' object has no attribute '%s'" % (self.__class__.__name__, name))
-
-    def __repr__(self):
-        return '%s(event_code: %r, %s)' % (
-                self.__class__.__name__, self.event_code,
-                ', '.join(['%s: %r' % (i[0], i[1]) for i in self.fields]))
-
 class HciReadRemoteVersionInformationComplete(HciEvent):
     def __init__(self, pkt):
         fields = [  ['status',            pkt[5],     1],
@@ -469,29 +499,4 @@ class HciCommandStatus(HciEvent):
 # - class HciNumCompletePackets(HciEventPkt):                    # - HCI_NUM_COMPLETED_PACKETS_EVENT                     = 0x0D
 # - class HciCommandComplete(HciEventPkt):                       # - HCI_COMMAND_COMPLETE_EVENT                          = 0x0E
 # - class HciCommandStatus(HciEventPkt):                         # - HCI_COMMAND_STATUS_EVENT                            = 0x0F
-
-
-def event_factory(data):
-    if data[2] == '\x04':
-        if data[3] == '\x05': return HciDisconnectionComplete(data)
-        #if data[3] == '\x08': return HciEncryptionChange(data)
-        if data[3] == '\x0C': return HciReadRemoteVersionInformationComplete(data)
-        if data[3] == '\x0E': return HciCommandComplete(data)
-        if data[3] == '\x0F': return HciCommandStatus(data)
-        if data[3] == '\x13': return HciNumCompletePackets(data)
-        #if data[3] == '\x30': return HciEncryptionKeyRefreshComplete(data)
-
-        if data[3] == '\x3e':
-            if data[5] == '\x01': return HciLeConnectionComplete(data)
-            if data[5] == '\x02': return HciLeAdvertisingReport(data)
-            #if data[5] == '\x03': return HciLeConnectionUpdateComplete(data)
-            #if data[5] == '\x04': return HciLeReadRemoteUsedFeaturesComplete(data)
-            #if data[5] == '\x05': return HciLeLongTermKeyRequest(data)
-    if data[2] == '\x02':
-        return HciDataPkt.deserialize(data)
-        pass
-    return 'Not decoded yet'
-
-    # rx <=: '\x18\x11\x02\x00 \x13\x00\x0f\x00\x04\x00\x0bXLR2_2_TempLog'
-
 
