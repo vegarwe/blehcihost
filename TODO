@@ -1,12 +1,21 @@
-- device interface for sending and receiving data
-- uart interface
+- check defaults in hci.py
+- Check field lengths in hci.py
+- consider where uart_type belongs
 - All HCI commands
 - All HCI events
 - Gap
 - Att
 - L2Cap
 - Smp
--
+- Look into:
+  class AttCommand(AttPkt):
+      EventCode = 0x95 # SerialCommTypeMapping.ATT_COMMAND_EVENTCODE
+- Automatic detect hci classes
+
 - buffers available module
 - connecitons database
 - gatt server module
+- security module
+
+- (done) uart interface
+- (done) device interface for sending and receiving data
