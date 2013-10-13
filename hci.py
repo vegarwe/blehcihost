@@ -136,22 +136,12 @@ class AttResponse(AttPkt):
 #            for v in value:
 #                self.value.append(int(v))
 #
-#    def __repr__(self):
-#        if self.handle == None:
-#            handle = 'None'
-#        else:
-#            handle = "0x%04x" % self.handle
-#        if self.uuid == None:
-#            uuid = 'None'
-#        else:
-#            uuid = "0x%04x" % self.uuid
-#        value = "".join([chr(i) for i in self.value])
-#        return "%s(handle=%s, uuid=%s, value=%s)" % (self.__class__.__name__, handle, uuid, repr(value))
 
 ###################### EVENTS ########################
 class HciEvent(HciPkt):
-    event_code = '\x00' # TODO: Find invalid op_code to put here
-    class_descr =    [] # TODO: Is it OK to access this static array with self.class_descr in init?
+    event_code     = '\x00' # TODO: Find invalid op_code to put here
+    sub_event_code = ''
+    class_descr    =  []    # TODO: Is it OK to access this static array with self.class_descr in init?
     def __init__(self, *args, **argv):
         HciPkt.__init__(self, '\x04')
         self.fields = _parse_fields(self.class_descr, args, argv)
@@ -163,12 +153,15 @@ class HciEvent(HciPkt):
         raise AttributeError("'%s' object has no attribute '%s'" % (self.__class__.__name__, name))
 
     def __repr__(self):
-        return '%s(event_code: %r, %s)' % (
-                self.__class__.__name__, self.event_code,
-                ', '.join(['%s: %r' % (i[0], i[1]) for i in self.fields]))
+        sub = ''
+        if self.sub_event_code != '':
+            sub = ', sub_event_code=%r' % self.sub_event_code
+        return '%s(event_code=%r%s, %s)' % (
+                self.__class__.__name__, self.event_code, sub,
+                ', '.join(['%s=%r' % (i[0], i[1]) for i in self.fields]))
 
-def event_factory(data):
-    if data[2] == '\x04':
+    @staticmethod
+    def deserialize(data):
         #             '\x01' - '\x04' not used by LE controller
         if data[3] == '\x05': return HciDisconnectionComplete.deserialize(data)
         #             '\x06' - '\x07' not used by LE controller
@@ -194,6 +187,10 @@ def event_factory(data):
             if data[5] == '\x05': return HciLeLongTermKeyRequest.deserialize(data)
         #             '\x40' - '\x3d' TODO: not used by LE controller?
 
+
+def event_factory(data):
+    if data[2] == '\x04':
+        return HciEvent.deserialize(data)
     if data[2] == '\x02':
         return HciDataPkt.deserialize(data)
     return 'Not decoded yet'
@@ -383,22 +380,22 @@ class HciNrfGetVersionInfo(HciCommand):
 ###################### ATT ###########################
 class AttErrorResponse(AttResponse):
     op_code = '\x01'
-    class_descr = [ ['error_op_code', 1, None],
-                    ['handle',        2, None],
-                    ['error_code',    1, None] ]
+    class_descr = [ ['error_op_code',           1, None],
+                    ['handle',                  2, None],
+                    ['error_code',              1, None] ]
 
 class AttFindInformationRequest(AttResponse):
     op_code = '\x04'
-    class_descr = [ ['start_handle',  2, '\x00\x00'],
-                    ['end_handle',    2, '\xff\xff'] ]
+    class_descr = [ ['start_handle',            2, '\x00\x00'],
+                    ['end_handle',              2, '\xff\xff'] ]
 
 class AttReadRequest(AttRequest):
     op_code = '\x0a'
-    class_descr = [ ['handle', 2, None] ]
+    class_descr = [ ['handle',                  2, None] ]
 
 class AttReadResponse(AttResponse):
     op_code = '\x0b'
-    class_descr = [ ['value', (1, ATT_MTU) , None] ]
+    class_descr = [ ['value',        (1, ATT_MTU), None] ]
 
     @staticmethod
     def deserialize(data):
@@ -406,8 +403,8 @@ class AttReadResponse(AttResponse):
 
 class AttWriteRequest(AttRequest):
     op_code = '\x12'
-    class_descr = [ ['handle',            2, None],
-                    ['value',  (1, ATT_MTU), None] ]
+    class_descr = [ ['handle',                  2, None],
+                    ['value',        (1, ATT_MTU), None] ]
 
 # - 'ERROR_RESPONSE'                :{'Opcode':0x01,'Pkt':AttErrorResponse,'minSize':5, 'maxSize':5},
 #   ## Server Configuration
@@ -445,26 +442,92 @@ class AttWriteRequest(AttRequest):
 
 
 ###################### EVENTS ########################
+class HciDisconnectionComplete(HciEvent):
+    event_code = '\x05'
+    class_descr = [ ['status',                  1, None],
+                    ['conn_handle',             2, None],
+                    ['reason',                  1, None]  ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciDisconnectionComplete(data[5], data[6:8], data[8])
+
+class HciEncryptionChange(HciEvent):
+    event_code = '\x08'
+    class_descr = [ ['status',                  1, None],
+                    ['conn_handle',             2, None],
+                    ['enc_enabled',             1, None] ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciEncryptionChange(data[5], data[6:8], data[8])
+
 class HciReadRemoteVersionInformationComplete(HciEvent):
     event_code = '\x0c'
-    class_descr = [ ['status',            1, None],
-                    ['conn_handle',       2, None],
-                    ['version',           1, None],
-                    ['manufacturer_name', 2, None],
-                    ['sub_version',       2, None]  ]
+    class_descr = [ ['status',                  1, None],
+                    ['conn_handle',             2, None],
+                    ['version',                 1, None],
+                    ['manufacturer_name',       2, None],
+                    ['sub_version',             2, None]  ]
 
     @staticmethod
     def deserialize(data):
         return HciReadRemoteVersionInformationComplete(
                 data[5], data[6:8], data[8], data[9:11], data[11:13])
 
+class HciCommandComplete(HciEvent):
+    event_code = '\x0e'
+    class_descr = [ ['num_hci_cmd_pkt',         1, None],
+                    ['commmand_op_code',        2, None],
+                    ['status',                  1, None],
+                    ['return_params',      (0, 9), None] ] # TODO: Find actual max limit here
+
+    @staticmethod
+    def deserialize(data):
+        return_params = ''
+        if len(data) > 8:
+            return_params = data[9:]
+        return HciCommandComplete(data[5], data[6:8], data[8], return_params)
+
+class HciCommandStatus(HciEvent):
+    event_code = '\x0f'
+    class_descr = [ ['status',                  1, None],
+                    ['num_hci_cmd_pkt',         1, None],
+                    ['commmand_op_code',        2, None] ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciCommandStatus(data[5], data[6], data[7:9])
+
+class HciNumCompletePackets(HciEvent):
+    event_code = '\x13'
+    class_descr = [ ['num_handles',             1, None],
+                    ['handles',            (1, 9), None] ] # TODO: Find actual max limit here
+
+    @staticmethod
+    def deserialize(data):
+        handles = []
+        for i in range(ord(data[5])):
+            pos = i*4+5
+            handles.append([data[pos:pos+1], data[pos+2:pos+3]])
+        return HciNumCompletePackets(data[5], handles)
+
+class HciEncryptionKeyRefreshComplete(HciEvent):
+    event_code = '\x30'
+    class_descr = [ ['status',                  1, None],
+                    ['conn_handle',             2, None] ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciEncryptionKeyRefreshComplete(data[5], data[6:8])
+
 class AdvReport(object):
-    class_descr = [ ['event_type', 1, None],
-                    ['addr_type',  1, None],
-                    ['addr',       6, None],
-                    ['length',     1, None],
-                    ['data',  (1, 9), None], # TODO: Find actual max size
-                    ['rssi',       1, None] ]
+    class_descr = [ ['event_type',              1, None],
+                    ['addr_type',               1, None],
+                    ['addr',                    6, None],
+                    ['length',                  1, None],
+                    ['data',               (1, 9), None], # TODO: Find actual max size
+                    ['rssi',                    1, None] ]
 
     def __init__(self, *args, **argv):
         self.fields = _parse_fields(self.class_descr, args, argv)
@@ -484,12 +547,29 @@ class AdvReport(object):
         length = ord(data[8])
         return AdvReport(data[0], data[1], data[2:8], data[8], data[9:9+length], data[9+length:])
 
+class HciLeConnectionComplete(HciEvent):
+    event_code = '\x3e'
+    sub_event_code = '\x01'
+    class_descr = [ ['status',                  1, None],
+                    ['conn_handle',             2, None],
+                    ['role',                    1, None],
+                    ['peer_addr_type',          1, None],
+                    ['peer_addr',               6, None],
+                    ['conn_interval',           2, None],
+                    ['conn_latency',            2, None],
+                    ['supervision_timeout',     2, None],
+                    ['master_clock_accuracy',   1, None] ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciLeConnectionComplete(data[6], data[7:9], data[9],
+                data[10], data[11:17], data[17:19], data[19:21], data[21:23], data[23])
+
 class HciLeAdvertisingReport(HciEvent):
     event_code = '\x3e'
     sub_event_code = '\x02'
-    class_descr = [ ['sub_event_code', 1, None],
-                    ['num_reports',    1, None],
-                    ['reports',   (1, 9), None] ] # TODO: Find actual max limit here
+    class_descr = [ ['num_reports',             1, None],
+                    ['reports',            (1, 9), None] ] # TODO: Find actual max limit here
 
     @staticmethod
     def deserialize(data):
@@ -499,129 +579,41 @@ class HciLeAdvertisingReport(HciEvent):
             length = 10 + ord(data[15+pos])
             reports.append(AdvReport.deserialize(data[7+pos:7+pos+length]))
             pos += length
-        return HciLeAdvertisingReport(data[5], data[6], reports)
-
-class HciLeConnectionComplete(HciEvent):
-    event_code = '\x3e'
-    sub_event_code = '\x01'
-    class_descr = [ ['sub_event_code',        1, None],
-                    ['status',                1, None],
-                    ['conn_handle',           2, None],
-                    ['role',                  1, None],
-                    ['peer_addr_type',        1, None],
-                    ['peer_addr',             6, None],
-                    ['conn_interval',         2, None],
-                    ['conn_latency',          2, None],
-                    ['supervision_timeout',   2, None],
-                    ['master_clock_accuracy', 1, None] ]
-
-    @staticmethod
-    def deserialize(data):
-        return HciLeConnectionComplete(data[5], data[6], data[7:9], data[9],
-                data[10], data[11:17], data[17:19], data[19:21], data[21:23], data[23])
-
-class HciLeReadRemoteUsedFeaturesComplete(HciEvent):
-    event_code = '\x3e'
-    sub_event_code = '\x04'
-    class_descr = [ ['sub_event_code',     1, None],
-                    ['status',             1, None],
-                    ['conn_handle',        1, None],
-                    ['le_features_ltlend', 1, None] ]
-
-    @staticmethod
-    def deserialize(data):
-        return HciLeReadRemoteUsedFeaturesComplete(data[5], data[6], data[7:9], data[9:])
-
-class HciLeLongTermKeyRequest(HciEvent):
-    event_code = '\x3e'
-    sub_event_code = '\x05'
-    class_descr = [ ['sub_event_code',     1, None],
-                    ['conn_handle',        1, None],
-                    ['rand_number_ltend',  8, None],
-                    ['ediv',               2, None] ]
-
-    @staticmethod
-    def deserialize(data):
-        return HciLeLongTermKeyRequest(data[5], data[6:8], data[8:16], data[16:18])
+        return HciLeAdvertisingReport(data[6], reports)
 
 class HciLeConnectionUpdateComplete(HciEvent):
     event_code = '\x3e'
     sub_event_code = '\x03'
-    class_descr = [ ['sub_event_code',      1, None],
-                    ['status',              1, None],
-                    ['conn_handle',         2, None],
-                    ['conn_interval',       2, None],
-                    ['conn_latency',        2, None],
-                    ['supervision_timeout', 2, None] ]
+    class_descr = [ ['status',                  1, None],
+                    ['conn_handle',             2, None],
+                    ['conn_interval',           2, None],
+                    ['conn_latency',            2, None],
+                    ['supervision_timeout',     2, None] ]
 
     @staticmethod
     def deserialize(data):
-        return HciLeConnectionUpdateComplete(data[5], data[6], data[7:9],
+        return HciLeConnectionUpdateComplete(data[6], data[7:9],
                 data[9:11], data[11:13], data[13:15])
 
-class HciDisconnectionComplete(HciEvent):
-    event_code = '\x05'
-    class_descr = [ ['status',      1, None],
-                    ['conn_handle', 2, None],
-                    ['reason',      1, None]  ]
+class HciLeReadRemoteUsedFeaturesComplete(HciEvent):
+    event_code = '\x3e'
+    sub_event_code = '\x04'
+    class_descr = [ ['status',                  1, None],
+                    ['conn_handle',             1, None],
+                    ['le_features_ltlend',      1, None] ]
 
     @staticmethod
     def deserialize(data):
-        return HciDisconnectionComplete(data[5], data[6:8], data[8])
+        return HciLeReadRemoteUsedFeaturesComplete(data[6], data[7:9], data[9:])
 
-class HciEncryptionChange(HciEvent):
-    event_code = '\x08'
-    class_descr = [ ['status',        1, None],
-                    ['conn_handle',   2, None],
-                    ['enc_enabled',   1, None] ]
-
-    @staticmethod
-    def deserialize(data):
-        return HciEncryptionChange(data[5], data[6:8], data[8])
-
-class HciNumCompletePackets(HciEvent):
-    event_code = '\x13'
-    class_descr = [ ['num_handles',   1, None],
-                    ['handles',  (1, 9), None] ] # TODO: Find actual max limit here
+class HciLeLongTermKeyRequest(HciEvent):
+    event_code = '\x3e'
+    sub_event_code = '\x05'
+    class_descr = [ ['conn_handle',             1, None],
+                    ['rand_number_ltend',       8, None],
+                    ['ediv',                    2, None] ]
 
     @staticmethod
     def deserialize(data):
-        handles = []
-        for i in range(ord(data[5])):
-            pos = i*4+5
-            handles.append([data[pos:pos+1], data[pos+2:pos+3]])
-        return HciNumCompletePackets(data[5], handles)
-
-class HciEncryptionKeyRefreshComplete(HciEvent):
-    event_code = '\x30'
-    class_descr = [ ['status',        1, None],
-                    ['conn_handle',   2, None] ]
-
-    @staticmethod
-    def deserialize(data):
-        return HciEncryptionKeyRefreshComplete(data[5], data[6:8])
-
-class HciCommandComplete(HciEvent):
-    event_code = '\x0e'
-    class_descr = [ ['num_hci_cmd_pkt',    1, None],
-                    ['commmand_op_code',   2, None],
-                    ['status',             1, None],
-                    ['return_params', (0, 9), None] ] # TODO: Find actual max limit here
-
-    @staticmethod
-    def deserialize(data):
-        return_params = ''
-        if len(data) > 8:
-            return_params = data[9:]
-        return HciCommandComplete(data[5], data[6:8], data[8], return_params)
-
-class HciCommandStatus(HciEvent):
-    event_code = '\x0f'
-    class_descr = [ ['status',           1, None],
-                    ['num_hci_cmd_pkt',  1, None],
-                    ['commmand_op_code', 2, None] ]
-
-    @staticmethod
-    def deserialize(data):
-        return HciCommandStatus(data[5], data[6], data[7:9])
+        return HciLeLongTermKeyRequest(data[6:8], data[8:16], data[16:18])
 
