@@ -150,10 +150,11 @@ class AttResponse(AttPkt):
 
 ###################### EVENTS ########################
 class HciEvent(HciPkt):
-    def __init__(self, event_code, fields):
+    event_code = '\x00' # TODO: Find invalid op_code to put here
+    class_descr =    [] # TODO: Is it OK to access this static array with self.class_descr in init?
+    def __init__(self, *args, **argv):
         HciPkt.__init__(self, '\x04')
-        self.event_code = event_code
-        self.fields = fields
+        self.fields = _parse_fields(self.class_descr, args, argv)
 
     def __getattr__(self, name):
         for field in self.fields:
@@ -168,20 +169,20 @@ class HciEvent(HciPkt):
 
 def event_factory(data):
     if data[2] == '\x04':
-        if data[3] == '\x05': return HciDisconnectionComplete(data)
-        #if data[3] == '\x08': return HciEncryptionChange(data)
-        if data[3] == '\x0C': return HciReadRemoteVersionInformationComplete(data)
-        if data[3] == '\x0E': return HciCommandComplete(data)
-        if data[3] == '\x0F': return HciCommandStatus(data)
-        if data[3] == '\x13': return HciNumCompletePackets(data)
-        #if data[3] == '\x30': return HciEncryptionKeyRefreshComplete(data)
+        if data[3] == '\x05': return HciDisconnectionComplete.deserialize(data)
+        #if data[3] == '\x08': return HciEncryptionChange.deserialize(data)
+        if data[3] == '\x0C': return HciReadRemoteVersionInformationComplete.deserialize(data)
+        if data[3] == '\x0E': return HciCommandComplete.deserialize(data)
+        if data[3] == '\x0F': return HciCommandStatus.deserialize(data)
+        if data[3] == '\x13': return HciNumCompletePackets.deserialize(data)
+        #if data[3] == '\x30': return HciEncryptionKeyRefreshComplete.deserialize(data)
 
         if data[3] == '\x3e':
-            if data[5] == '\x01': return HciLeConnectionComplete(data)
-            if data[5] == '\x02': return HciLeAdvertisingReport(data)
-            #if data[5] == '\x03': return HciLeConnectionUpdateComplete(data)
-            #if data[5] == '\x04': return HciLeReadRemoteUsedFeaturesComplete(data)
-            #if data[5] == '\x05': return HciLeLongTermKeyRequest(data)
+            if data[5] == '\x01': return HciLeConnectionComplete.deserialize(data)
+            if data[5] == '\x02': return HciLeAdvertisingReport.deserialize(data)
+            #if data[5] == '\x03': return HciLeConnectionUpdateComplete.deserialize(data)
+            #if data[5] == '\x04': return HciLeReadRemoteUsedFeaturesComplete.deserialize(data)
+            #if data[5] == '\x05': return HciLeLongTermKeyRequest.deserialize(data)
     if data[2] == '\x02':
         return HciDataPkt.deserialize(data)
         pass
@@ -194,12 +195,12 @@ class HciReset(HciCommand):
 
 class HciDisconnect(HciCommand):
     op_code = '\x06\x04'
-    class_descr = [ ['conn_handle', 2, None],
-                    ['reason'     , 1, '\x13'] ]
+    class_descr = [ ['conn_handle',              2, None],
+                    ['reason'     ,              1, '\x13'] ]
 
 class HciReadRemoteVersionInformation(HciCommand):
     op_code = '\x1d\x04'
-    class_descr = [ ['conn_handle', 2, '\xff\xff'] ]
+    class_descr = [ ['conn_handle',              2, None] ]
 
 class HciReadPublicDeviceAddress(HciCommand):
     op_code = '\x09\x10'
@@ -212,18 +213,18 @@ class HciLeReadLocalSupportedFeatures(HciCommand):
 
 class HciLeSetRandomAddress(HciCommand):
     op_code = '\x05\x20'
-    class_descr = [ ['addr', 6, None] ]
+    class_descr = [ ['addr',                    6, None] ]
 
 class HciLeSetAdvertisingParameters(HciCommand):
     op_code = '\x06\x20'
-    class_descr = [ ['adv_interval_min' , 2, '\x00\x08'],
-                    ['adv_interval_max' , 2, '\x00\x08'],
-                    ['adv_type'         , 1, '\x00'],
-                    ['own_addr_type'    , 1, '\x01'],
-                    ['direct_addr_type' , 1, '\x00'],
-                    ['direct_addr'      , 6, '\x00\x00\x00\x00\x00\x00'],
-                    ['adv_channel_map'  , 1, '\x03'],
-                    ['adv_filter_policy', 1, '\x00'] ]
+    class_descr = [ ['adv_interval_min' ,       2, '\x00\x08'],
+                    ['adv_interval_max' ,       2, '\x00\x08'],
+                    ['adv_type'         ,       1, '\x00'],
+                    ['own_addr_type'    ,       1, '\x01'],
+                    ['direct_addr_type' ,       1, '\x00'],
+                    ['direct_addr'      ,       6, '\x00\x00\x00\x00\x00\x00'],
+                    ['adv_channel_map'  ,       1, '\x03'],
+                    ['adv_filter_policy',       1, '\x00'] ]
 
 class HciLeSetAdvertisingEnable(HciCommand):
     op_code = '\x0a\x20'
@@ -231,16 +232,16 @@ class HciLeSetAdvertisingEnable(HciCommand):
 
 class HciLeSetScanParametersCommand(HciCommand):
     op_code = '\x0b\x20'
-    class_descr = [ ['scan_type'         , 1, '\x00'],
-                    ['scan_interval'     , 2, '\x10\x00'],
-                    ['scan_window'       , 2, '\x20\x00'],
-                    ['own_addr_type'     , 1, '\x00'],
-                    ['scan_filter_policy', 1, '\x00'] ]
+    class_descr = [ ['scan_type'         ,      1, '\x00'],
+                    ['scan_interval'     ,      2, '\x10\x00'],
+                    ['scan_window'       ,      2, '\x20\x00'],
+                    ['own_addr_type'     ,      1, '\x00'],
+                    ['scan_filter_policy',      1, '\x00'] ]
 
 class HciLeSetScanEnable(HciCommand):
     op_code = '\x0c\x20'
-    class_descr = [ ['scan_enable'      , 1, '\x00'],
-                    ['filter_duplicates', 1, '\x00'] ]
+    class_descr = [ ['scan_enable'      ,       1, '\x00'],
+                    ['filter_duplicates',       1, '\x00'] ]
 
 class HciLeCreateConnection(HciCommand):
     op_code = '\x0d\x20'
@@ -269,60 +270,121 @@ class HciLeClearWhiteList(HciCommand):
 
 class HciLeAddDeviceToWhiteList(HciCommand):
     op_code = '\x11\x20'
-    class_descr = [ ['addr_type', 1, '\x00'],
-                    ['addr',      6, '\x00\x00\x00\x00\x00\x00'] ]
+    class_descr = [ ['addr_type',               1, '\x00'],
+                    ['addr',                    6, '\x00\x00\x00\x00\x00\x00'] ]
 
 class HciLeConnectionUpdate(HciCommand):
     op_code = '\x13\x20'
-    class_descr = [ ['connection_handle',   2, '\x00\x00'],
-                    ['conn_interval_min',   2, '\x50\x00'],
-                    ['conn_interval_max',   2, '\x50\x00'],
-                    ['conn_latency',        2, '\x00\x00'],
-                    ['supervision_timeout', 2, '\x50\x02'],
-                    ['min_ce_length',       2, '\x50\x00'],
-                    ['max_ce_length',       2, '\x50\x00'] ]
+    class_descr = [ ['conn_handle',             2, None],
+                    ['conn_interval_min',       2, '\x50\x00'],
+                    ['conn_interval_max',       2, '\x50\x00'],
+                    ['conn_latency',            2, '\x00\x00'],
+                    ['supervision_timeout',     2, '\x50\x02'],
+                    ['min_ce_length',           2, '\x50\x00'],
+                    ['max_ce_length',           2, '\x50\x00'] ]
+
+class HciLeSetHostChannelClassification(HciCommand):
+    op_code = '\x14\x20'
+    class_descr = [ ['channel_map', 5, None] ]
+
+class HciLeReadChannelMap(HciCommand):
+    op_code = '\x15\x20'
+    class_descr = [ ['conn_handle',             2, None] ]
+
+class HciLeReadRemoteUsedFeatures(HciCommand):  
+    op_code = '\x16\x20'
+    class_descr = [ ['conn_handle',             2, None] ]
+
+class HciLeEncrypt(HciCommand):
+    op_code = '\x17\x20'
+    class_descr = [ ['key_ltlend',             16, None],
+                    ['plain_text_ltlend',      16, None] ]
+
+class HciLeRand(HciCommand):
+    op_code = '\x18\x20'
+
+class HciLeStartEncryption(HciCommand):
+    op_code = '\x19\x20'
+    class_descr = [ ['conn_handle',             2, None],
+                    ['rand_number',             8, None],
+                    ['ediv',                    2, None],
+                    ['long_term_key_ltlend',   16, None] ]
+
+class HciLeLongTermKeyRequestReply(HciCommand):
+    op_code = '\x1a\x20'
+    class_descr = [ ['conn_handle',             2, None],
+                    ['long_term_key_ltlend',   16, None] ]
+
+class HciLeLongTermKeyRequestNegativeReply(HciCommand):
+    op_code = '\x1b\x20'
+    class_descr = [ ['conn_handle',             2, None] ]
+
+class HciNrfSetClockParameters(HciCommand):
+    op_code = '\x01\xfc'
+    class_descr = [ ['clk_src_32k',             1, None],
+                    ['sleep_clk_acc',           1, None],
+                    ['clk_src_16m',             1, None] ]
+
+class HciNrfSetTransmitPowerLevel(HciCommand):
+    op_code = '\x02\xfc'
+    class_descr = [ ['tx_level',                1, None] ]
+
+class HciNrfSetBdAddr(HciCommand):
+    op_code = '\x03\xfc'
+    class_descr = [ ['device_addr',             6, None] ]
 
 class HciNrfGetVersionInfo(HciCommand):
     op_code = '\x06\xfc'
 
-# - HciReset:                            {'OpCode':030C,'Length':0},
+# + HciReset:                            {'OpCode':030C,'Length':0},
 # - HciDisconnect:                       {'OpCode':0604,'Length':3},
 # - HciReadRemoteVersionInformation:     {'OpCode':1D04,'Length':2},
-# - HciReadPublicDeviceAddress:          {'OpCode':0910,'Length':0},
-# - HciLeReadBufferSize:                 {'OpCode':0220,'Length':0},
+# + HciReadPublicDeviceAddress:          {'OpCode':0910,'Length':0},
+# + HciLeReadBufferSize:                 {'OpCode':0220,'Length':0},
 # - HciLeReadLocalSupportedFeatures:     {'OpCode':0320,'Length':0},
 # - HciLeSetRandomAddress:               {'OpCode':0520,'Length':6},
 # - HciLeSetAdvertisingParameters:       {'OpCode':0620,'Length':15},
 # - HciLeSetAdvertisingEnable:           {'OpCode':0A20,'Length':1},
-# - HciLeSetScanParametersCommand:       {'OpCode':0B20,'Length':7},
-# - HciLeSetScanEnable:                  {'OpCode':0C20,'Length':2},
+# + HciLeSetScanParametersCommand:       {'OpCode':0B20,'Length':7},
+# + HciLeSetScanEnable:                  {'OpCode':0C20,'Length':2},
 # - HciLeCreateConnection:               {'OpCode':0D20,'Length':25},
 # - HciLeCreateConnectionCancel:         {'OpCode':0E20,'Length':0},
 # - HciLeReadWhiteListSize:              {'OpCode':0F20,'Length':0},
 # - HciLeClearWhiteList:                 {'OpCode':1020,'Length':0},
 # - HciLeAddDeviceToWhiteList:           {'OpCode':1120,'Length':7},
 # - HciLeConnectionUpdate:               {'OpCode':1320,'Length':14},
-#   HciLeSetHostChannelClassification:   {'OpCode':1420,'Length':5},
-#   HciLeReadChannelMap:                 {'OpCode':1520,'Length':2},
-#   HciLeReadRemoteUsedFeatures:         {'OpCode':1620,'Length':2},
-#   HciLeEncrypt:                        {'OpCode':1720,'Length':32},
-#   HciLeRand:                           {'OpCode':1820,'Length':0},
-#   HciLeStartEncryption:                {'OpCode':1920,'Length':28},
-#   HciLeLongTermKeyRequestReply:        {'OpCode':1A20,'Length':18},
-#   HciLeLongTermKeyRequestNegativeReply:{'OpCode':1B20,'Length':2},
-#   HciNrfSetClockParameters:            {'OpCode':01FC,'Length':3},
-#   HciNrfSetTransmitPowerLevel:         {'OpCode':02FC,'Length':1},
-#   HciNrfSetBdAddr:                     {'OpCode':03FC,'Length':6},
-# - HciNrfGetVersionInfo:                {'OpCode':06FC,'Length':0},
+# - HciLeSetHostChannelClassification:   {'OpCode':1420,'Length':5},
+# - HciLeReadChannelMap:                 {'OpCode':1520,'Length':2},
+# - HciLeReadRemoteUsedFeatures:         {'OpCode':1620,'Length':2},
+# - HciLeEncrypt:                        {'OpCode':1720,'Length':32},
+# - HciLeRand:                           {'OpCode':1820,'Length':0},
+# - HciLeStartEncryption:                {'OpCode':1920,'Length':28},
+# - HciLeLongTermKeyRequestReply:        {'OpCode':1A20,'Length':18},
+# - HciLeLongTermKeyRequestNegativeReply:{'OpCode':1B20,'Length':2},
+# - HciNrfSetClockParameters:            {'OpCode':01FC,'Length':3},
+# - HciNrfSetTransmitPowerLevel:         {'OpCode':02FC,'Length':1},
+# - HciNrfSetBdAddr:                     {'OpCode':03FC,'Length':6},
+# + HciNrfGetVersionInfo:                {'OpCode':06FC,'Length':0},
 
 ###################### DATA ##########################
 
 ###################### L2CAP #########################
 
 ###################### ATT ###########################
+class AttErrorResponse(AttResponse):
+    op_code = '\x01'
+    class_descr = [ ['error_op_code', 1, None],
+                    ['handle',        2, None],
+                    ['error_code',    1, None] ]
+
+class AttFindInformationRequest(AttResponse):
+    op_code = '\x04'
+    class_descr = [ ['start_handle',  2, '\x00\x00'],
+                    ['end_handle',    2, '\xff\xff'] ]
+
 class AttReadRequest(AttRequest):
     op_code = '\x0a'
-    class_descr = [ ['handle', 1, None] ]
+    class_descr = [ ['handle', 2, None] ]
 
 class AttReadResponse(AttResponse):
     op_code = '\x0b'
@@ -337,12 +399,12 @@ class AttWriteRequest(AttRequest):
     class_descr = [ ['handle',            2, None],
                     ['value',  (1, ATT_MTU), None] ]
 
-#   'ERROR_RESPONSE'                :{'Opcode':0x01,'Pkt':AttErrorResponse,'minSize':5, 'maxSize':5},
+# - 'ERROR_RESPONSE'                :{'Opcode':0x01,'Pkt':AttErrorResponse,'minSize':5, 'maxSize':5},
 #   ## Server Configuration
 #   'EXCHANGE_MTU_REQUEST'          :{'Opcode':0x02,'Pkt':AttExchangeMtuRequest,'minSize':3, 'maxSize':3},
 #   'EXCHANGE_MTU_RESPONSE'         :{'Opcode':0x03,'Pkt':AttExchangeMtuResponse,'minSize':3, 'maxSize':3},
 #   ## Discovery
-#   'FIND_INFORMATION_REQUEST'      :{'Opcode':0x04,'Pkt':AttFindInformationRequest,'minSize':5, 'maxSize':5},
+# - 'FIND_INFORMATION_REQUEST'      :{'Opcode':0x04,'Pkt':AttFindInformationRequest,'minSize':5, 'maxSize':5},
 #   'FIND_INFORMATION_RESPONSE'     :{'Opcode':0x05,'Pkt':AttFindInformationResponse,'minSize':6, 'maxSize':ATT_MTU},
 #   'FIND_BY_TYPE_VALUE_REQUEST'    :{'Opcode':0x06,'Pkt':AttFindByTypeValueRequest,'minSize':7, 'maxSize':ATT_MTU},
 #   'FIND_BY_TYPE_VALUE_RESPONSE'   :{'Opcode':0x07,'Pkt':AttFindByTypeValueResponse,'minSize':5, 'maxSize':ATT_MTU},
@@ -374,23 +436,28 @@ class AttWriteRequest(AttRequest):
 
 ###################### EVENTS ########################
 class HciReadRemoteVersionInformationComplete(HciEvent):
-    def __init__(self, pkt):
-        fields = [  ['status',            pkt[5],     1],
-                    ['conn_handle',       pkt[6:8],   2],
-                    ['version',           pkt[8],     1],
-                    ['manufacturer_name', pkt[9:11],  2],
-                    ['sub_version',       pkt[11:13], 2]  ]
-        HciEvent.__init__(self, '\x01', fields)
+    event_code = '\x01'
+    class_descr = [ ['status',            1, None],
+                    ['conn_handle',       2, None],
+                    ['version',           1, None],
+                    ['manufacturer_name', 2, None],
+                    ['sub_version',       2, None]  ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciReadRemoteVersionInformationComplete(
+                data[5], data[6:8], data[8], data[9:11], data[11:13])
 
 class AdvReport(object):
-    def __init__(self, pkt):
-        length = ord(pkt[8])
-        self.fields = [ ['event_type', pkt[0],          1],
-                        ['addr_type',  pkt[1],          1],
-                        ['addr',       pkt[2:8],        6],
-                        ['length',     pkt[8],          1],
-                        ['data',       pkt[9:9+length], length],
-                        ['rssi',       pkt[9+length:],  1] ]
+    class_descr = [ ['event_type', 1, None],
+                    ['addr_type',  1, None],
+                    ['addr',       6, None],
+                    ['length',     1, None],
+                    ['data',  (1, 9), None], # TODO: Find actual max size
+                    ['rssi',       1, None] ]
+
+    def __init__(self, *args, **argv):
+        self.fields = _parse_fields(self.class_descr, args, argv)
 
     def __getattr__(self, name):
         for field in self.fields:
@@ -402,101 +469,120 @@ class AdvReport(object):
         tmp = ', '.join(['%s: %r' % (i[0], i[1]) for i in self.fields])
         return '%s(%s)' % (self.__class__.__name__, tmp)
 
+    @staticmethod
+    def deserialize(data):
+        length = ord(data[8])
+        return AdvReport(data[0], data[1], data[2:8], data[8], data[9:9+length], data[9+length:])
+
 class HciLeAdvertisingReport(HciEvent):
-    def __init__(self, pkt):
+    event_code = '\x04'
+    class_descr = [ ['sub_event_code', 1, None],
+                    ['num_reports',    1, None],
+                    ['reports',   (1, 9), None] ] # TODO: Find actual max limit here
+
+    @staticmethod
+    def deserialize(data):
         reports = []
-        num_reports = ord(pkt[6])
-        fields = [  ['sub_event_code', pkt[5],  1],
-                    ['num_reports',    pkt[6],  1],
-                    ['reports',        reports, num_reports] ]
         pos = 0
-        for i in range(num_reports):
-            length = 10 + ord(pkt[15+pos])
-            reports.append(AdvReport(pkt[7+pos:7+pos+length]))
+        for i in range(ord(data[6])):
+            length = 10 + ord(data[15+pos])
+            reports.append(AdvReport.deserialize(data[7+pos:7+pos+length]))
             pos += length
-        HciEvent.__init__(self, '\x04', fields)
+        return HciLeAdvertisingReport(data[5], data[6], reports)
 
 class HciLeConnectionComplete(HciEvent):
-    def __init__(self, pkt):
-        reports = []
-        num_reports = ord(pkt[6])
-        fields = [  ['sub_event_code',        pkt[5],     1],
-                    ['status',                pkt[6],     1],
-                    ['conn_handle',           pkt[7:9],   2],
-                    ['role',                  pkt[9],     1],
-                    ['peer_addr_type',        pkt[10],    1],
-                    ['peer_addr',             pkt[11:17], 6],
-                    ['conn_interval',         pkt[17:19], 2],
-                    ['conn_latency',          pkt[19:21], 2],
-                    ['supervision_timeout',   pkt[21:23], 2],
-                    ['master_clock_accuracy', pkt[23],    1] ]
-        HciEvent.__init__(self, '\x05', fields)
+    event_code = '\x05'
+    class_descr = [ ['sub_event_code',        1, None],
+                    ['status',                1, None],
+                    ['conn_handle',           2, None],
+                    ['role',                  1, None],
+                    ['peer_addr_type',        1, None],
+                    ['peer_addr',             6, None],
+                    ['conn_interval',         2, None],
+                    ['conn_latency',          2, None],
+                    ['supervision_timeout',   2, None],
+                    ['master_clock_accuracy', 1, None] ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciLeConnectionComplete(data[5], data[6], data[7:9], data[9],
+                data[10], data[11:17], data[17:19], data[19:21], data[21:23], data[23])
+
 
 class HciLeConnectionUpdateComplete(HciEvent):
-    def parse(self, packet):
-        self.SubEventCode       = packet[2]
-        self.Status             = packet[3]
-        self.ConnectionHandle   = packet[4] | (packet[5] << 8)
-        self.ConnInterval       = packet[6] | (packet[7] << 8)
-        self.ConnLatency        = packet[8] | (packet[9] << 8)
-        self.SupervisionTimeout = packet[10] | (packet[11] << 8)
-    def __init__(self, pkt):
-        fields = [  ['sub_event_code',        pkt[5],     1],
-                    ['status',                pkt[6],     1],
-                    ['conn_handle',           pkt[7:9],   2],
-                    ['conn_interval',         pkt[9:11],  2],
-                    ['conn_latency',          pkt[11:13], 2],
-                    ['supervision_timeout',   pkt[13:15], 2] ]
-        HciEvent.__init__(self, '\x07', fields)
+    event_code = '\x07'
+    class_descr = [ ['sub_event_code',      1, None],
+                    ['status',              1, None],
+                    ['conn_handle',         2, None],
+                    ['conn_interval',       2, None],
+                    ['conn_latency',        2, None],
+                    ['supervision_timeout', 2, None] ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciLeConnectionUpdateComplete(data[5], data[6], data[7:9],
+                data[9:11], data[11:13], data[13:15])
 
 class HciDisconnectionComplete(HciEvent):
-    def __init__(self, pkt):
-        fields = [  ['status',        pkt[5],   1],
-                    ['conn_handle',   pkt[6:8], 2],
-                    ['reason',        pkt[8],   1]  ]
-        HciEvent.__init__(self, '\x0a', fields)
+    event_code = '\x0a'
+    class_descr = [ ['status',      1, None],
+                    ['conn_handle', 2, None],
+                    ['reason',      1, None]  ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciDisconnectionComplete(data[5], data[6:8], data[8])
 
 class HciNumCompletePackets(HciEvent):
-    def __init__(self, pkt):
-        num_handles = ord(pkt[5])
+    event_code = '\x0d'
+    class_descr = [ ['num_handles',   1, None],
+                    ['handles',  (1, 9), None] ] # TODO: Find actual max limit here
+
+    @staticmethod
+    def deserialize(data):
         handles = []
-        fields = [  ['num_handles',      pkt[5],   1],
-                    ['handles',         handles,   num_handles] ]
-        for i in range(num_handles):
+        for i in range(ord(data[5])):
             pos = i*4+5
-            handles.append([pkt[pos:pos+1], pkt[pos+2:pos+3]])
-        HciEvent.__init__(self, '\x0d', fields)
+            handles.append([data[pos:pos+1], data[pos+2:pos+3]])
+        return HciNumCompletePackets(data[5], handles)
 
 class HciCommandComplete(HciEvent):
-    def __init__(self, pkt):
-        fields = [  ['num_hci_cmd_pkt',  pkt[5],   1],
-                    ['commmand_op_code', pkt[6:8], 2],
-                    ['status',           pkt[8],   1]  ]
-        if len(pkt) > 8:
-            fields.append(['return_params', pkt[9:], len(pkt[9:])])
-        HciEvent.__init__(self, '\x0e', fields)
+    event_code = '\x0e'
+    class_descr = [ ['num_hci_cmd_pkt',    1, None],
+                    ['commmand_op_code',   2, None],
+                    ['status',             1, None],
+                    ['return_params', (0, 9), None] ] # TODO: Find actual max limit here
+
+    @staticmethod
+    def deserialize(data):
+        return_params = ''
+        if len(data) > 8:
+            return_params = data[9:]
+        return HciCommandComplete(data[5], data[6:8], data[8], return_params)
 
 class HciCommandStatus(HciEvent):
-    def __init__(self, pkt):
-        fields = [  ['status',           pkt[5],   1],
-                    ['num_hci_cmd_pkt',  pkt[6],   1],
-                    ['commmand_op_code', pkt[7:9], 2] ]
-        HciEvent.__init__(self, '\x0f', fields)
+    event_code = '\x0f'
+    class_descr = [ ['status',           1, None],
+                    ['num_hci_cmd_pkt',  1, None],
+                    ['commmand_op_code', 2, None] ]
 
-# - class HciReadRemoteVersionInformationComplete(HciEventPkt):  # - HCI_READ_REMOTE_VERSION_INFORMATION_COMPLETE_EVENT  = 0x01
+    @staticmethod
+    def deserialize(data):
+        return HciCommandStatus(data[5], data[6], data[7:9])
+
+# + class HciReadRemoteVersionInformationComplete(HciEventPkt):  # - HCI_READ_REMOTE_VERSION_INFORMATION_COMPLETE_EVENT  = 0x01
 #                                                                #   HCI_ERROR_EVENT                                     = 0x02
 #                                                                #   HCI_DATA_BUFFER_OVERFLOW_EVENT                      = 0x03
-# - class AdvReport(object):
-# - class HciLeAdvertisingReport(HciEventPkt):                   # - HCI_ADVERTISING_PACKET_REPORT_EVENT                 = 0x04
-# - class HciLeConnectionComplete(HciEventPkt):                  # - HCI_LL_CONNECTION_CREATED_EVENT                     = 0x05
+# + class HciLeAdvertisingReport(HciEventPkt):                   # - HCI_ADVERTISING_PACKET_REPORT_EVENT                 = 0x04
+# + class HciLeConnectionComplete(HciEventPkt):                  # - HCI_LL_CONNECTION_CREATED_EVENT                     = 0x05
 #   class HciLeReadRemoteUsedFeaturesComplete(HciEventPkt):      #   HCI_READ_REMOTE_USED_FEATURES_COMPLETE_EVENT        = 0x06
 # - class HciLeConnectionUpdateComplete(HciEventPkt):            # - HCI_LL_CONNECTION_PAR_UPDATE_COMPLETE_EVENT         = 0x07
 #   class HciLeLongTermKeyRequest(HciEventPkt):                  #   HCI_LONG_TERM_KEY_REQUESTED_EVENT                   = 0x08
 #                                                                #   HCI_FLUSH_OCCURRED_EVENT                            = 0x09
-# - class HciDisconnectionComplete(HciEventPkt):                 # - HCI_LL_CONNECTION_TERMINATION_EVENT                 = 0x0A
+# + class HciDisconnectionComplete(HciEventPkt):                 # - HCI_LL_CONNECTION_TERMINATION_EVENT                 = 0x0A
 #   class HciEncryptionChange(HciEventPkt):                      #   HCI_ENCRYPTION_CHANGE_EVENT                         = 0x0B
 #   class HciEncryptionKeyRefreshComplete(HciEventPkt):          #   HCI_ENCRYPTION_KEY_REFRESH_COMPLETE_EVENT           = 0x0C
-# - class HciNumCompletePackets(HciEventPkt):                    # - HCI_NUM_COMPLETED_PACKETS_EVENT                     = 0x0D
-# - class HciCommandComplete(HciEventPkt):                       # - HCI_COMMAND_COMPLETE_EVENT                          = 0x0E
+# + class HciNumCompletePackets(HciEventPkt):                    # - HCI_NUM_COMPLETED_PACKETS_EVENT                     = 0x0D
+# + class HciCommandComplete(HciEventPkt):                       # - HCI_COMMAND_COMPLETE_EVENT                          = 0x0E
 # - class HciCommandStatus(HciEventPkt):                         # - HCI_COMMAND_STATUS_EVENT                            = 0x0F
 

@@ -22,31 +22,41 @@ class App(object):
         dev.write_cmd(hci.HciLeReadBufferSize())
 
         # Scan and get address from ADV packet
-        dev.write_cmd(hci.HciLeSetScanParametersCommand())
-        dev.write_cmd(hci.HciLeSetScanEnable('\x01'))
-        pkt = dev.wait_for_pkt(20)
-        self.log.info('blipp: %r', pkt)
-        dev.write_cmd(hci.HciLeSetScanEnable('\x00'))
+        #dev.write_cmd(hci.HciLeSetScanParametersCommand())
+        #dev.write_cmd(hci.HciLeSetScanEnable('\x01'))
+        #pkt = dev.wait_for_pkt(20)
+        #self.log.info('blipp: %r', pkt)
+        #dev.write_cmd(hci.HciLeSetScanEnable('\x00'))
 
-        if not pkt:
-            return
+        #if not pkt:
+        #    self.log.info('log No adv packet seen')
+        #    return
 
-        address = pkt.reports[0].addr
-        #address = '\xba\x12\xc5\x9e\xa8\xe5'
+        #address = pkt.reports[0].addr
+        address = '\xba\x12\xc5\x9e\xa8\xe5'
 
         self.log.info('log Connecting to %r' % address)
         dev.write_cmd(hci.HciLeCreateConnection(peer_addr = address))
 
         pkt = dev.wait_for_pkt(20)
         if not pkt:
+            self.log.info('log Not able to connect')
             return
 
         conn_handle = pkt.conn_handle
         self.log.info('log conn %r', pkt)
 
+        dev.write_cmd(hci.HciReadRemoteVersionInformation(conn_handle=conn_handle))
+        pkt = dev.wait_for_pkt(1)
+        self.log.info('HciReadRemoteVersionInformation: %r', pkt)
+
         dev.write_data(conn_handle, hci.AttReadRequest(handle='\x03\x00'))
         pkt = dev.wait_for_pkt(1)
         self.log.info('blipp: %r', pkt)
+
+        dev.write_cmd(hci.HciDisconnect(conn_handle))
+        pkt = dev.wait_for_pkt(1)
+        self.log.info('disconnect: %r', pkt)
 
 if __name__ == '__main__':
     #from optparse import OptionParser
@@ -58,10 +68,11 @@ if __name__ == '__main__':
     #pkt = hci.AttReadRequest(handle='\x03\x00')
     #print '%s - %r' % (pkt, pkt.serialize())
 
-    data = '\x18\x11\x02\x00 \x13\x00\x0f\x00\x04\x00\x0bXLR2_2_TempLog'
-    print 'data %r' % data
-    print '%s' % (hci.event_factory(data))
-    raise SystemExit(1)
+    #data = '\x18\x11\x02\x00 \x13\x00\x0f\x00\x04\x00\x0bXLR2_2_TempLog'
+    #print 'data %r' % data
+    #print '%s' % (hci.event_factory(data))
+
+    #raise SystemExit(1)
 
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
