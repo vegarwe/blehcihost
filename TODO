@@ -11,6 +11,9 @@
       EventCode = 0x95 # SerialCommTypeMapping.ATT_COMMAND_EVENTCODE
 - Automatic detect hci classes
 - deserialize HciDataPkt
+- Parse status codes
+- check all _ltend
+- Remove all event_code
 
 - buffers available module
 - connecitons database

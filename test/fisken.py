@@ -50,6 +50,10 @@ class App(object):
         pkt = dev.wait_for_pkt(1)
         self.log.info('HciReadRemoteVersionInformation: %r', pkt)
 
+        dev.write_cmd(hci.HciLeReadRemoteUsedFeatures(conn_handle=conn_handle))
+        pkt = dev.wait_for_pkt(1)
+        self.log.info('HciLeReadRemoteUsedFeatures: %r', pkt)
+
         dev.write_data(conn_handle, hci.AttReadRequest(handle='\x03\x00'))
         pkt = dev.wait_for_pkt(1)
         self.log.info('blipp: %r', pkt)
