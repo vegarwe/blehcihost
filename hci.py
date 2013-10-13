@@ -169,23 +169,33 @@ class HciEvent(HciPkt):
 
 def event_factory(data):
     if data[2] == '\x04':
+        #             '\x01' - '\x04' not used by LE controller
         if data[3] == '\x05': return HciDisconnectionComplete.deserialize(data)
-        #if data[3] == '\x08': return HciEncryptionChange.deserialize(data)
-        if data[3] == '\x0C': return HciReadRemoteVersionInformationComplete.deserialize(data)
-        if data[3] == '\x0E': return HciCommandComplete.deserialize(data)
-        if data[3] == '\x0F': return HciCommandStatus.deserialize(data)
+        #             '\x06' - '\x07' not used by LE controller
+        if data[3] == '\x08': return HciEncryptionChange.deserialize(data)
+        #             '\x09' - '\x0a' not used by LE controller
+       #if data[3] == '\x0b': return HciReadRemoteSupportedFeatures.deserialize(data)
+        if data[3] == '\x0c': return HciReadRemoteVersionInformationComplete.deserialize(data)
+        #             '\x0d' not used by LE controller
+        if data[3] == '\x0e': return HciCommandComplete.deserialize(data)
+        if data[3] == '\x0f': return HciCommandStatus.deserialize(data)
+       #if data[3] == '\x10': return HardwareError.deserialize(data) # TODO: Used by LE?
+       #if data[3] == '\x11': return FlushOccurred.deserialize(data) # TODO: Used by LE?
+        #             '\x12' not used by LE controller
         if data[3] == '\x13': return HciNumCompletePackets.deserialize(data)
-        #if data[3] == '\x30': return HciEncryptionKeyRefreshComplete.deserialize(data)
-
+        #             '\x14' - '\xyy' TODO: not used by LE controller?
+        if data[3] == '\x30': return HciEncryptionKeyRefreshComplete.deserialize(data)
+        #             '\x31' - '\x3d' TODO: not used by LE controller?
         if data[3] == '\x3e':
             if data[5] == '\x01': return HciLeConnectionComplete.deserialize(data)
             if data[5] == '\x02': return HciLeAdvertisingReport.deserialize(data)
-            #if data[5] == '\x03': return HciLeConnectionUpdateComplete.deserialize(data)
-            #if data[5] == '\x04': return HciLeReadRemoteUsedFeaturesComplete.deserialize(data)
-            #if data[5] == '\x05': return HciLeLongTermKeyRequest.deserialize(data)
+           #if data[5] == '\x03': return HciLeConnectionUpdateComplete.deserialize(data)
+            if data[5] == '\x04': return HciLeReadRemoteUsedFeaturesComplete.deserialize(data)
+            if data[5] == '\x05': return HciLeLongTermKeyRequest.deserialize(data)
+        #             '\x40' - '\x3d' TODO: not used by LE controller?
+
     if data[2] == '\x02':
         return HciDataPkt.deserialize(data)
-        pass
     return 'Not decoded yet'
 
 
@@ -436,7 +446,7 @@ class AttWriteRequest(AttRequest):
 
 ###################### EVENTS ########################
 class HciReadRemoteVersionInformationComplete(HciEvent):
-    event_code = '\x01'
+    event_code = '\x0c'
     class_descr = [ ['status',            1, None],
                     ['conn_handle',       2, None],
                     ['version',           1, None],
@@ -475,7 +485,8 @@ class AdvReport(object):
         return AdvReport(data[0], data[1], data[2:8], data[8], data[9:9+length], data[9+length:])
 
 class HciLeAdvertisingReport(HciEvent):
-    event_code = '\x04'
+    event_code = '\x3e'
+    sub_event_code = '\x02'
     class_descr = [ ['sub_event_code', 1, None],
                     ['num_reports',    1, None],
                     ['reports',   (1, 9), None] ] # TODO: Find actual max limit here
@@ -491,7 +502,8 @@ class HciLeAdvertisingReport(HciEvent):
         return HciLeAdvertisingReport(data[5], data[6], reports)
 
 class HciLeConnectionComplete(HciEvent):
-    event_code = '\x05'
+    event_code = '\x3e'
+    sub_event_code = '\x01'
     class_descr = [ ['sub_event_code',        1, None],
                     ['status',                1, None],
                     ['conn_handle',           2, None],
@@ -508,9 +520,33 @@ class HciLeConnectionComplete(HciEvent):
         return HciLeConnectionComplete(data[5], data[6], data[7:9], data[9],
                 data[10], data[11:17], data[17:19], data[19:21], data[21:23], data[23])
 
+class HciLeReadRemoteUsedFeaturesComplete(HciEvent):
+    event_code = '\x3e'
+    sub_event_code = '\x04'
+    class_descr = [ ['sub_event_code',     1, None],
+                    ['status',             1, None],
+                    ['conn_handle',        1, None],
+                    ['le_features_ltlend', 1, None] ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciLeReadRemoteUsedFeaturesComplete(data[5], data[6], data[7:9], data[9:])
+
+class HciLeLongTermKeyRequest(HciEvent):
+    event_code = '\x3e'
+    sub_event_code = '\x05'
+    class_descr = [ ['sub_event_code',     1, None],
+                    ['conn_handle',        1, None],
+                    ['rand_number_ltend',  8, None],
+                    ['ediv',               2, None] ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciLeLongTermKeyRequest(data[5], data[6:8], data[8:16], data[16:18])
 
 class HciLeConnectionUpdateComplete(HciEvent):
-    event_code = '\x07'
+    event_code = '\x3e'
+    sub_event_code = '\x03'
     class_descr = [ ['sub_event_code',      1, None],
                     ['status',              1, None],
                     ['conn_handle',         2, None],
@@ -524,7 +560,7 @@ class HciLeConnectionUpdateComplete(HciEvent):
                 data[9:11], data[11:13], data[13:15])
 
 class HciDisconnectionComplete(HciEvent):
-    event_code = '\x0a'
+    event_code = '\x05'
     class_descr = [ ['status',      1, None],
                     ['conn_handle', 2, None],
                     ['reason',      1, None]  ]
@@ -533,8 +569,18 @@ class HciDisconnectionComplete(HciEvent):
     def deserialize(data):
         return HciDisconnectionComplete(data[5], data[6:8], data[8])
 
+class HciEncryptionChange(HciEvent):
+    event_code = '\x08'
+    class_descr = [ ['status',        1, None],
+                    ['conn_handle',   2, None],
+                    ['enc_enabled',   1, None] ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciEncryptionChange(data[5], data[6:8], data[8])
+
 class HciNumCompletePackets(HciEvent):
-    event_code = '\x0d'
+    event_code = '\x13'
     class_descr = [ ['num_handles',   1, None],
                     ['handles',  (1, 9), None] ] # TODO: Find actual max limit here
 
@@ -545,6 +591,15 @@ class HciNumCompletePackets(HciEvent):
             pos = i*4+5
             handles.append([data[pos:pos+1], data[pos+2:pos+3]])
         return HciNumCompletePackets(data[5], handles)
+
+class HciEncryptionKeyRefreshComplete(HciEvent):
+    event_code = '\x30'
+    class_descr = [ ['status',        1, None],
+                    ['conn_handle',   2, None] ]
+
+    @staticmethod
+    def deserialize(data):
+        return HciEncryptionKeyRefreshComplete(data[5], data[6:8])
 
 class HciCommandComplete(HciEvent):
     event_code = '\x0e'
@@ -569,20 +624,4 @@ class HciCommandStatus(HciEvent):
     @staticmethod
     def deserialize(data):
         return HciCommandStatus(data[5], data[6], data[7:9])
-
-# + class HciReadRemoteVersionInformationComplete(HciEventPkt):  # - HCI_READ_REMOTE_VERSION_INFORMATION_COMPLETE_EVENT  = 0x01
-#                                                                #   HCI_ERROR_EVENT                                     = 0x02
-#                                                                #   HCI_DATA_BUFFER_OVERFLOW_EVENT                      = 0x03
-# + class HciLeAdvertisingReport(HciEventPkt):                   # - HCI_ADVERTISING_PACKET_REPORT_EVENT                 = 0x04
-# + class HciLeConnectionComplete(HciEventPkt):                  # - HCI_LL_CONNECTION_CREATED_EVENT                     = 0x05
-#   class HciLeReadRemoteUsedFeaturesComplete(HciEventPkt):      #   HCI_READ_REMOTE_USED_FEATURES_COMPLETE_EVENT        = 0x06
-# - class HciLeConnectionUpdateComplete(HciEventPkt):            # - HCI_LL_CONNECTION_PAR_UPDATE_COMPLETE_EVENT         = 0x07
-#   class HciLeLongTermKeyRequest(HciEventPkt):                  #   HCI_LONG_TERM_KEY_REQUESTED_EVENT                   = 0x08
-#                                                                #   HCI_FLUSH_OCCURRED_EVENT                            = 0x09
-# + class HciDisconnectionComplete(HciEventPkt):                 # - HCI_LL_CONNECTION_TERMINATION_EVENT                 = 0x0A
-#   class HciEncryptionChange(HciEventPkt):                      #   HCI_ENCRYPTION_CHANGE_EVENT                         = 0x0B
-#   class HciEncryptionKeyRefreshComplete(HciEventPkt):          #   HCI_ENCRYPTION_KEY_REFRESH_COMPLETE_EVENT           = 0x0C
-# + class HciNumCompletePackets(HciEventPkt):                    # - HCI_NUM_COMPLETED_PACKETS_EVENT                     = 0x0D
-# + class HciCommandComplete(HciEventPkt):                       # - HCI_COMMAND_COMPLETE_EVENT                          = 0x0E
-# - class HciCommandStatus(HciEventPkt):                         # - HCI_COMMAND_STATUS_EVENT                            = 0x0F
 
