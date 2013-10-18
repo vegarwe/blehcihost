@@ -6,9 +6,8 @@ sys.path.append('..')
 
 import logging
 
-from blehcihost import SerialHci
-from blehcihost import DeviceInterface
-from blehcihost import hci
+from blehcihost import hci, bleutil, SerialHci, DeviceInterface
+
 
 class App(object):
     def __init__(self):
@@ -22,19 +21,20 @@ class App(object):
         dev.write_cmd(hci.HciLeReadBufferSize())
 
         # Scan and get address from ADV packet
-        #dev.write_cmd(hci.HciLeSetScanParametersCommand())
-        #dev.write_cmd(hci.HciLeSetScanEnable('\x01'))
-        #pkt = dev.wait_for_pkt(20)
-        #self.log.info('blipp: %r', pkt)
-        #dev.write_cmd(hci.HciLeSetScanEnable('\x00'))
+        dev.write_cmd(hci.HciLeSetScanParametersCommand())
+        dev.write_cmd(hci.HciLeSetScanEnable('\x01'))
+        pkt = dev.wait_for_pkt(20)
+        self.log.info('log %r', pkt)
+        dev.write_cmd(hci.HciLeSetScanEnable('\x00'))
 
-        #if not pkt:
-        #    self.log.info('log No adv packet seen')
-        #    return
+        if not pkt:
+            self.log.info('log No adv packet seen')
+            return
 
-        #address = pkt.reports[0].addr
-        address = '\xba\x12\xc5\x9e\xa8\xe5'
+        address = pkt.reports[0].addr
+        #address = '\xba\x12\xc5\x9e\xa8\xe5'
 
+        # Connect
         self.log.info('log Connecting to %r' % address)
         dev.write_cmd(hci.HciLeCreateConnection(peer_addr = address))
 
@@ -44,23 +44,52 @@ class App(object):
             return
 
         conn_handle = pkt.conn_handle
-        self.log.info('log conn %r', pkt)
+        self.log.info('log connected')
 
+        # Test some different features
         dev.write_cmd(hci.HciReadRemoteVersionInformation(conn_handle=conn_handle))
-        pkt = dev.wait_for_pkt(1)
-        self.log.info('HciReadRemoteVersionInformation: %r', pkt)
+        pkt = dev.wait_for_pkt()
+        self.log.info('log: %s', pkt)
 
-        dev.write_cmd(hci.HciLeReadRemoteUsedFeatures(conn_handle=conn_handle))
-        pkt = dev.wait_for_pkt(1)
-        self.log.info('HciLeReadRemoteUsedFeatures: %r', pkt)
+        #dev.write_cmd(hci.HciLeReadRemoteUsedFeatures(conn_handle=conn_handle))
+        #pkt = dev.wait_for_pkt()
+        #self.log.info('log: %s', pkt)
+
+        dev.write_data(conn_handle, hci.AttExchangeMtuRequest())
+        pkt = dev.wait_for_pkt()
+        self.log.info('log: %s', pkt)
 
         dev.write_data(conn_handle, hci.AttReadRequest(handle='\x03\x00'))
-        pkt = dev.wait_for_pkt(1)
-        self.log.info('blipp: %r', pkt)
+        pkt = dev.wait_for_pkt()
+        self.log.info('log: %s', pkt)
+
+        peer_db = bleutil.get_peer_db(dev, conn_handle)
+
+        for attr in peer_db:
+            self.log.info('db handle %r', attr)
+
+        # Enable temp log service and gather data
+        dev.write_data(conn_handle, hci.AttWriteRequest(handle='\x0f\x00', value='\x02\x00'))
+        pkt = dev.wait_for_pkt()
+        self.log.info('log: %s', pkt)
+
+        while True:
+            pkt = dev.wait_for_pkt()
+            if pkt == None:
+                break
+            if not isinstance(pkt, hci.HciPkt):
+                continue
+            if not isinstance(pkt.payload_pkt, hci.L2CapPkt):
+                continue
+            if isinstance(pkt.payload_pkt.payload_pkt, hci.AttHandleValueIndication):
+                dev.write_data(conn_handle, hci.AttHandleValueConfirmation())
+                self.log.info('confirmed indication: %s', pkt)
+                continue
+            self.log.info('log: %r', pkt)
 
         dev.write_cmd(hci.HciDisconnect(conn_handle))
-        pkt = dev.wait_for_pkt(1)
-        self.log.info('disconnect: %r', pkt)
+        pkt = dev.wait_for_pkt()
+        self.log.info('disconnect: %s', pkt)
 
 if __name__ == '__main__':
     #from optparse import OptionParser
@@ -76,19 +105,21 @@ if __name__ == '__main__':
     #print 'data %r' % data
     #print '%s' % (hci.event_factory(data))
 
+    #print '%r' % hci.AttWriteRequest(handle='\x0f\x00', value='\x02\x00').serialize()
     #raise SystemExit(1)
+
 
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     #logger.setLevel(logging.DEBUG)
     logger.addHandler(logging.StreamHandler())
 
-    logging.getLogger('dev_if').setLevel(logging.DEBUG)
-    logging.getLogger('main').setLevel(logging.DEBUG)
-    logging.getLogger('serial').setLevel(logging.DEBUG)
+    #logging.getLogger('main').setLevel(logging.DEBUG)
+    #logging.getLogger('dev_if').setLevel(logging.DEBUG)
+    #logging.getLogger('serial').setLevel(logging.DEBUG)
 
     app = App()
-    dev = DeviceInterface(SerialHci('com5'))
+    dev = DeviceInterface(SerialHci('com5', baudrate=1000000))
     try:
         app.main(dev)
     except:

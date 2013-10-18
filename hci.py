@@ -22,7 +22,6 @@ class HciPkt(object):
     def __init__(self, uart_type):
         self.uart_type = uart_type
 
-###################### COMMANDS ######################
 class HciCommand(HciPkt):
     op_code = '\x00\x00' # TODO: Find invalid op_code to put here
     class_descr = []     # TODO: Is it OK to access this static array with self.class_descr in init?
@@ -34,7 +33,7 @@ class HciCommand(HciPkt):
     def serialize(self):
         data = ''
         for field in self.fields:
-            data += field[1] # TODO: Verify size of field
+            data += field[1]
         length = chr(len(data))
         return ''.join([self.uart_type, self.op_code, length, data])
 
@@ -46,8 +45,6 @@ class HciCommand(HciPkt):
                     self.__class__.__name__, self.op_code,
                     ', '.join(['%s=%r' % (i[0], i[1]) for i in self.fields]))
 
-###################### DATA ##########################
-# BLUETOOTH SPECIFICATION Version 4.0 [Vol 2] page 429 of 1114
 class HciDataPkt(HciPkt):
     def __init__(self, conn_handle, payload_pkt, pb_flag='\x00', bc_flag='\x00'):
         HciPkt.__init__(self, '\x02')
@@ -70,9 +67,8 @@ class HciDataPkt(HciPkt):
         return HciDataPkt('\xff\xfe', L2CapPkt.deserialize(data[9:]))
 
     def __repr__(self):
-        return '%s(conn_handle=%r, %r)' % (self.__class__.__name__, self.conn_handle, self.payload_pkt)
+        return '%s(conn_handle=%r, payload_pkt=%r)' % (self.__class__.__name__, self.conn_handle, self.payload_pkt)
 
-###################### L2CAP #########################
 class L2CapPkt(object):
     def __init__(self, payload_pkt):
         self.payload_pkt = payload_pkt
@@ -93,9 +89,8 @@ class L2CapPkt(object):
             return L2CapPkt(AttResponse.deserialize(data[2:]))
 
     def __repr__(self):
-        return '%s(channel_id=%r, %r)' % (self.__class__.__name__, self.channel_id, self.payload_pkt)
+        return '%s(channel_id=%r, payload_pkt=%r)' % (self.__class__.__name__, self.channel_id, self.payload_pkt)
 
-###################### ATT ###########################
 ATT_MTU = 23
 class AttPkt(object):
     op_code = '\x00' # TODO: Find invalid op_code to put here
@@ -118,14 +113,29 @@ class AttPkt(object):
                     self.__class__.__name__, self.op_code,
                     ', '.join(['%s=%r' % (i[0], i[1]) for i in self.fields]))
 
+    def __getattr__(self, name):
+        for field in self.fields:
+            if field[0] == name:
+                return field[1]
+        raise AttributeError("'%s' object has no attribute '%s'" % (self.__class__.__name__, name))
+
 class AttRequest(AttPkt):
     pass
 
 class AttResponse(AttPkt):
     @staticmethod
     def deserialize(data):
-        if data[0] == '\x0b':
-            return AttReadResponse.deserialize(data[1:])
+        responses = [ 
+                AttErrorResponse,
+                AttExchangeMtuResponse,
+                AttFindInformationResponse,
+                AttReadResponse,
+                AttWriteResponse,
+                AttHandleValueIndication
+        ]
+        for response in responses:
+            if data[0] == response.op_code:
+                return response.deserialize(data[1:])
 
 #class Attribute:
 #    def __init__(self, handle, uuid, value=None):
@@ -137,7 +147,6 @@ class AttResponse(AttPkt):
 #                self.value.append(int(v))
 #
 
-###################### EVENTS ########################
 class HciEvent(HciPkt):
     event_code     = '\x00' # TODO: Find invalid op_code to put here
     sub_event_code = ''
@@ -384,10 +393,60 @@ class AttErrorResponse(AttResponse):
                     ['handle',                  2, None],
                     ['error_code',              1, None] ]
 
-class AttFindInformationRequest(AttResponse):
+class AttExchangeMtuRequest(AttRequest):
+    op_code = '\x02'
+    class_descr = [ ['rx_mtu',                  2, '\x23\x00'] ]
+
+class AttExchangeMtuResponse(AttResponse):
+    op_code = '\x03'
+    class_descr = [ ['rx_mtu',                  2, '\x23\x00'] ]
+
+    @staticmethod
+    def deserialize(data):
+        return AttExchangeMtuResponse(data)
+
+class AttFindInformationRequest(AttRequest):
     op_code = '\x04'
     class_descr = [ ['start_handle',            2, '\x00\x00'],
                     ['end_handle',              2, '\xff\xff'] ]
+
+class AttFindInformationResponse(AttResponse):
+    op_code = '\x05'
+    class_descr = [ ['format',                  1, '\x01'],
+                    ['attributes',         (1, 9), []] ] # TODO: Find actual max limit here
+
+    @staticmethod
+    def deserialize(data):
+        format_ = data[0]
+        attrs = data[1:]
+        if   format_ == '\x01':
+            attributes = [(attrs[(4*i):(4*i)+2], attrs[(4*i)+2:(4*i)+4]) for i in xrange(0, len(attrs)/4)]
+        elif format_ == '\x02':
+            attributes = [(attrs[(18*i):(18*i)+2], attrs[(18*i)+2:(18*i)+18]) for i in xrange(0, len(attrs)/18)]
+        # TODO: Else, raise hell
+        return AttFindInformationResponse(format_, attributes)
+
+    def parse(self, packet):
+        size = len(packet)
+        self.Format = self.Content[1]
+        self.Attributes = []
+        size = size - 2;
+        if self.Format == format['TYPE_16']:
+            index = 2
+            while size >= 4:
+                handle = (self.Content[index+1]<<8) | self.Content[index]
+                uuid = (self.Content[index+3]<<8) | self.Content[index+2]
+                self.Attributes.append(Attribute(handle, uuid, None))
+                size = size - 4
+                index = index + 4
+        elif self.Format == format['TYPE_128']:
+            handle = (self.Content[3] << 8) | self.Content[2]
+            temp = self.Content[4:]
+            temp.reverse()
+            uuid = 0
+            for value in temp:
+                uuid = (uuid << 8) | value
+            self.Attributes.append(Attribute(handle, uuid, None))
 
 class AttReadRequest(AttRequest):
     op_code = '\x0a'
@@ -401,18 +460,46 @@ class AttReadResponse(AttResponse):
     def deserialize(data):
         return AttReadResponse(data)
 
+class AttWriteCommand(AttRequest):
+    op_code = '\x52'
+    class_descr = [ ['handle',                  2, None],
+                    ['value',        (1, ATT_MTU), None] ]
+
 class AttWriteRequest(AttRequest):
     op_code = '\x12'
     class_descr = [ ['handle',                  2, None],
                     ['value',        (1, ATT_MTU), None] ]
 
+class AttWriteResponse(AttResponse):
+    op_code = '\x13'
+
+    @staticmethod
+    def deserialize(data):
+        return AttWriteResponse()
+
+class AttHandleValueIndication(AttResponse):
+    op_code = '\x1d'
+    class_descr = [ ['handle',                  2, None],
+                    ['value',        (1, ATT_MTU), None] ]
+
+    @staticmethod
+    def deserialize(data):
+        return AttHandleValueIndication(data[0:2], data[2:])
+
+class AttHandleValueConfirmation(AttResponse):
+    op_code = '\x1e'
+
+    @staticmethod
+    def deserialize(data):
+        return AttHandleValueConfirmation()
+
 # - 'ERROR_RESPONSE'                :{'Opcode':0x01,'Pkt':AttErrorResponse,'minSize':5, 'maxSize':5},
 #   ## Server Configuration
-#   'EXCHANGE_MTU_REQUEST'          :{'Opcode':0x02,'Pkt':AttExchangeMtuRequest,'minSize':3, 'maxSize':3},
-#   'EXCHANGE_MTU_RESPONSE'         :{'Opcode':0x03,'Pkt':AttExchangeMtuResponse,'minSize':3, 'maxSize':3},
+# + 'EXCHANGE_MTU_REQUEST'          :{'Opcode':0x02,'Pkt':AttExchangeMtuRequest,'minSize':3, 'maxSize':3},
+# + 'EXCHANGE_MTU_RESPONSE'         :{'Opcode':0x03,'Pkt':AttExchangeMtuResponse,'minSize':3, 'maxSize':3},
 #   ## Discovery
 # - 'FIND_INFORMATION_REQUEST'      :{'Opcode':0x04,'Pkt':AttFindInformationRequest,'minSize':5, 'maxSize':5},
-#   'FIND_INFORMATION_RESPONSE'     :{'Opcode':0x05,'Pkt':AttFindInformationResponse,'minSize':6, 'maxSize':ATT_MTU},
+# - 'FIND_INFORMATION_RESPONSE'     :{'Opcode':0x05,'Pkt':AttFindInformationResponse,'minSize':6, 'maxSize':ATT_MTU},
 #   'FIND_BY_TYPE_VALUE_REQUEST'    :{'Opcode':0x06,'Pkt':AttFindByTypeValueRequest,'minSize':7, 'maxSize':ATT_MTU},
 #   'FIND_BY_TYPE_VALUE_RESPONSE'   :{'Opcode':0x07,'Pkt':AttFindByTypeValueResponse,'minSize':5, 'maxSize':ATT_MTU},
 #   ## Read
@@ -427,18 +514,18 @@ class AttWriteRequest(AttRequest):
 #   'READ_BY_GROUP_TYPE_REQUEST'    :{'Opcode':0x10,'Pkt':AttReadByGroupTypeRequest,'minSize':7, 'maxSize':21},
 #   'READ_BY_GROUP_TYPE_RESPONSE'   :{'Opcode':0x11,'Pkt':AttReadByGroupTypeResponse,'minSize':5, 'maxSize':ATT_MTU},
 #   ## Write
-#   'WRITE_COMMAND'                 :{'Opcode':0x52,'Pkt':AttWriteCommand,'minSize':3, 'maxSize':ATT_MTU},
+# - 'WRITE_COMMAND'                 :{'Opcode':0x52,'Pkt':AttWriteCommand,'minSize':3, 'maxSize':ATT_MTU},
 #   'SIGNED_WRITE_COMMAND'          :{'Opcode':0xD2,'Pkt':AttSignedWriteCommand,'minSize':3, 'maxSize':ATT_MTU},
-# - 'WRITE_REQUEST'                 :{'Opcode':0x12,'Pkt':AttWriteRequest,'minSize':3, 'maxSize':ATT_MTU},
-#   'WRITE_RESPONSE'                :{'Opcode':0x13,'Pkt':AttWriteResponse,'minSize':1, 'maxSize':1},
+# + 'WRITE_REQUEST'                 :{'Opcode':0x12,'Pkt':AttWriteRequest,'minSize':3, 'maxSize':ATT_MTU},
+# + 'WRITE_RESPONSE'                :{'Opcode':0x13,'Pkt':AttWriteResponse,'minSize':1, 'maxSize':1},
 #   'PREPARE_WRITE_REQUEST'         :{'Opcode':0x16,'Pkt':AttPrepareWriteRequest,'minSize':5, 'maxSize':ATT_MTU},
 #   'PREPARE_WRITE_RESPONSE'        :{'Opcode':0x17,'Pkt':AttPrepareWriteResponse,'minSize':5, 'maxSize':ATT_MTU},
 #   'EXECUTE_WRITE_REQUEST'         :{'Opcode':0x18,'Pkt':AttExecuteWriteRequest,'minSize':2, 'maxSize':2},
 #   'EXECUTE_WRITE_RESPONSE'        :{'Opcode':0x19,'Pkt':AttExecuteWriteResponse,'minSize':1, 'maxSize':1},
 #   ## Server Initiated
 #   'HANDLE_VALUE_NOTIFICATION'     :{'Opcode':0x1B,'Pkt':AttHandleValueNotification,'minSize':3, 'maxSize':ATT_MTU},
-#   'HANDLE_VALUE_INDICATION'       :{'Opcode':0x1D,'Pkt':AttHandleValueIndication,'minSize':3, 'maxSize':ATT_MTU},
-#   'HANDLE_VALUE_CONFIRMATION'     :{'Opcode':0x1E,'Pkt':AttHandleValueConfirmation,'minSize':1, 'maxSize':1},
+# + 'HANDLE_VALUE_INDICATION'       :{'Opcode':0x1D,'Pkt':AttHandleValueIndication,'minSize':3, 'maxSize':ATT_MTU},
+# + 'HANDLE_VALUE_CONFIRMATION'     :{'Opcode':0x1E,'Pkt':AttHandleValueConfirmation,'minSize':1, 'maxSize':1},
 
 
 ###################### EVENTS ########################

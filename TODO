@@ -1,7 +1,6 @@
 - check defaults in hci.py
 - Check field lengths in hci.py
 - consider where uart_type belongs
-- All HCI events
 - Gap
 - Att
 - L2Cap
@@ -13,7 +12,8 @@
 - deserialize HciDataPkt
 - Parse status codes
 - check all _ltend
-- Remove all event_code
+- op_code lookup
+- event status lookup
 
 - buffers available module
 - connecitons database
@@ -23,3 +23,5 @@
 - (done) uart interface
 - (done) device interface for sending and receiving data
 - (done) All HCI commands
+- (done) All HCI events
+- (done) Fix all event_code
