@@ -24,7 +24,7 @@ class App(object):
         dev.write_cmd(hci.HciLeSetScanParametersCommand())
         dev.write_cmd(hci.HciLeSetScanEnable('\x01'))
         pkt = dev.wait_for_pkt(20)
-        self.log.info('log %r', pkt)
+        if pkt: self.log.info('log %r', pkt.reports[0].data)
         dev.write_cmd(hci.HciLeSetScanEnable('\x00'))
 
         if not pkt:
@@ -49,29 +49,29 @@ class App(object):
         # Test some different features
         dev.write_cmd(hci.HciReadRemoteVersionInformation(conn_handle=conn_handle))
         pkt = dev.wait_for_pkt()
-        self.log.info('log: %s', pkt)
+        self.log.info('log %s', pkt)
 
         #dev.write_cmd(hci.HciLeReadRemoteUsedFeatures(conn_handle=conn_handle))
         #pkt = dev.wait_for_pkt()
-        #self.log.info('log: %s', pkt)
+        #self.log.info('log %s', pkt)
 
         dev.write_data(conn_handle, hci.AttExchangeMtuRequest())
         pkt = dev.wait_for_pkt()
-        self.log.info('log: %s', pkt)
+        self.log.info('log %s', pkt)
 
         dev.write_data(conn_handle, hci.AttReadRequest(handle='\x03\x00'))
         pkt = dev.wait_for_pkt()
-        self.log.info('log: %s', pkt)
+        self.log.info('log %s', pkt)
 
         peer_db = bleutil.get_peer_db(dev, conn_handle)
 
         for attr in peer_db:
-            self.log.info('db handle %r', attr)
+            self.log.info('db  handle %r', attr)
 
         # Enable temp log service and gather data
         dev.write_data(conn_handle, hci.AttWriteRequest(handle='\x0f\x00', value='\x02\x00'))
         pkt = dev.wait_for_pkt()
-        self.log.info('log: %s', pkt)
+        self.log.info('log %s', pkt)
 
         while True:
             pkt = dev.wait_for_pkt()
@@ -79,47 +79,38 @@ class App(object):
                 break
             if not isinstance(pkt, hci.HciPkt):
                 continue
-            if not isinstance(pkt.payload_pkt, hci.L2CapPkt):
-                continue
-            if isinstance(pkt.payload_pkt.payload_pkt, hci.AttHandleValueIndication):
+            att = pkt.payload_pkt.payload_pkt
+            if isinstance(att, hci.AttHandleValueIndication):
                 dev.write_data(conn_handle, hci.AttHandleValueConfirmation())
-                self.log.info('confirmed indication: %s', pkt)
+                self.log.info('confirmed indication: %r', att.value)
                 continue
-            self.log.info('log: %r', pkt)
+            self.log.info('log %r', pkt)
 
         dev.write_cmd(hci.HciDisconnect(conn_handle))
         pkt = dev.wait_for_pkt()
-        self.log.info('disconnect: %s', pkt)
+        self.log.info('log disconnect: %s', pkt)
 
 if __name__ == '__main__':
-    #from optparse import OptionParser
+    from optparse import OptionParser
 
-    #pkt = hci.HciReset()
-    #print '%s' % (pkt)
-    #pkt = hci.HciLeCreateConnection('\x10\x00', peer_addr='\xba\x12\xc5\x9e\xa8\xe5')
-    #print '%s' % (pkt)
-    #pkt = hci.AttReadRequest(handle='\x03\x00')
-    #print '%s - %r' % (pkt, pkt.serialize())
-
-    #data = '\x18\x11\x02\x00 \x13\x00\x0f\x00\x04\x00\x0bXLR2_2_TempLog'
-    #print 'data %r' % data
-    #print '%s' % (hci.event_factory(data))
-
-    #print '%r' % hci.AttWriteRequest(handle='\x0f\x00', value='\x02\x00').serialize()
-    #raise SystemExit(1)
-
+    parser = OptionParser()
+    parser.add_option("-c", "--comp-port", dest="comport",                      help="Device com port")
+    parser.add_option("-b", "--baud-rate", dest="baud",    type="int",          help="Device com port")
+    parser.add_option("-v", "--verbose",   dest="verbose", action="store_true", help="Turn on verbose mode")
+    (options, args) = parser.parse_args()
 
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    #logger.setLevel(logging.DEBUG)
     logger.addHandler(logging.StreamHandler())
 
-    #logging.getLogger('main').setLevel(logging.DEBUG)
-    #logging.getLogger('dev_if').setLevel(logging.DEBUG)
-    #logging.getLogger('serial').setLevel(logging.DEBUG)
+    if options.verbose:
+        #logger.setLevel(logging.DEBUG)
+        logging.getLogger('main').setLevel(logging.DEBUG)
+        logging.getLogger('dev_if').setLevel(logging.DEBUG)
+        logging.getLogger('serial').setLevel(logging.DEBUG)
 
     app = App()
-    dev = DeviceInterface(SerialHci('com5', baudrate=1000000))
+    dev = DeviceInterface(SerialHci(options.comport, options.baud))
     try:
         app.main(dev)
     except:
