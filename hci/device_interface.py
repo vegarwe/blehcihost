@@ -3,7 +3,7 @@ import logging
 import Queue
 import serial
 
-import hci
+import protocol
 
 class DeviceInterface(threading.Thread):
     def __init__(self, pkt_handler=None):
@@ -13,7 +13,6 @@ class DeviceInterface(threading.Thread):
         if self.pkt_handler == None:
             self.pkt_queue = Queue.Queue()
         self.keep_running = False
-        self.start()
 
     def stop(self):
         self.keep_running = False
@@ -25,7 +24,7 @@ class DeviceInterface(threading.Thread):
                 data = self.read()
                 if data == '': continue
 
-                pkt = hci.event_factory(data)
+                pkt = protocol.event_factory(data)
                 if self.pkt_handler == None:
                     self.pkt_queue.put(pkt)
                 else:
@@ -44,11 +43,11 @@ class DeviceInterface(threading.Thread):
         self.write(pkt.serialize())
 
     def write_data(self, conn_handle, data):
-        self._write(hci.HciDataPkt(conn_handle, hci.L2CapPkt(data)))
+        self._write(protocol.HciDataPkt(conn_handle, protocol.L2CapPkt(data)))
         while True:
             pkt = self.wait_for_pkt()
 
-            if pkt.__class__ == hci.HciNumCompletePackets:
+            if pkt.__class__ == protocol.HciNumCompletePackets:
                 self.log.debug('data %s, pkt %r', data.__class__.__name__, pkt)
                 return pkt
             if pkt == None:
@@ -59,16 +58,16 @@ class DeviceInterface(threading.Thread):
     def write_cmd(self, cmd):
         self._write(cmd)
         while True:
-            #if cmd.__class__ == hci.HciLeCreateConnection:
+            #if cmd.__class__ == protocol.HciLeCreateConnection:
             #    self.log.debug('cmd %s, no cmd response', cmd.__class__.__name__)
             #    return # TODO: Why do we get no CommandComplete or CommandStatus for this?
 
             pkt = self.wait_for_pkt()
 
-            if pkt.__class__ == hci.HciCommandComplete:
+            if pkt.__class__ == protocol.HciCommandComplete:
                 self.log.debug('cmd %s, pkt %r', cmd.__class__.__name__, pkt)
                 return pkt
-            if pkt.__class__ == hci.HciCommandStatus:
+            if pkt.__class__ == protocol.HciCommandStatus:
                 self.log.debug('cmd %s, pkt %r', cmd.__class__.__name__, pkt)
                 return pkt
             if pkt == None:
@@ -96,6 +95,7 @@ class SerialHci(DeviceInterface):
         DeviceInterface.__init__(self, pkt_handler)
         self.serial = serial.Serial(port=port, baudrate=baudrate, rtscts=rtscts, timeout=0.1)
         self.log.debug("Opended port %s, baudrate %s, rtscts %s", port, baudrate, rtscts)
+        self.start()
 
     def close(self):
         self.serial.close()
