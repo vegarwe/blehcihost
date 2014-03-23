@@ -1,14 +1,14 @@
 import threading
 import logging
 import Queue
+import serial
 
 import hci
 
 class DeviceInterface(threading.Thread):
-    def __init__(self, driver, pkt_handler=None):
+    def __init__(self, pkt_handler=None):
         threading.Thread.__init__(self)
         self.log = logging.getLogger('dev_if')
-        self.driver = driver
         self.pkt_handler = pkt_handler
         if self.pkt_handler == None:
             self.pkt_queue = Queue.Queue()
@@ -22,7 +22,7 @@ class DeviceInterface(threading.Thread):
         self.keep_running = True
         try:
             while self.keep_running:
-                data = self.driver.read()
+                data = self.read()
                 if data == '': continue
 
                 pkt = hci.event_factory(data)
@@ -36,12 +36,12 @@ class DeviceInterface(threading.Thread):
             self.keep_running = False
             self.log.debug("Read thread finished")
 
-        self.driver.close()
+        self.close()
 
     def _write(self, pkt):
         if not self.keep_running:
             return
-        self.driver.write(pkt.serialize())
+        self.write(pkt.serialize())
 
     def write_data(self, conn_handle, data):
         self._write(hci.HciDataPkt(conn_handle, hci.L2CapPkt(data)))
@@ -81,3 +81,46 @@ class DeviceInterface(threading.Thread):
             return self.pkt_queue.get(True, timeout)
         except Queue.Empty, ex:
             return None
+
+    def close(self):
+        raise NotImplementedError()
+
+    def read(self):
+        raise NotImplementedError()
+
+    def write(self, data):
+        raise NotImplementedError()
+
+class SerialHci(DeviceInterface):
+    def __init__(self, port, baudrate=115200, rtscts=True, pkt_handler=None):
+        DeviceInterface.__init__(self, pkt_handler)
+        self.serial = serial.Serial(port=port, baudrate=baudrate, rtscts=rtscts, timeout=0.1)
+        self.log.debug("Opended port %s, baudrate %s, rtscts %s", port, baudrate, rtscts)
+
+    def close(self):
+        self.serial.close()
+
+    def read(self):
+        data = self.serial.read(1)
+        if data == '':
+            return ''
+
+        if data[0] == '\x04':
+            data += self.serial.read(2)
+            if data[2] != '\x00':
+                data += self.serial.read(ord(data[2]))
+            data = chr(len(data)) + '\x12' + data
+        elif data[0] == '\x02':
+            data += self.serial.read(4)
+            if data[3] != '\x00':
+                data += self.serial.read(ord(data[3]))
+            data = chr(len(data)) + '\x11' + data
+        else:
+            return ''
+        self.log.debug('rx <=: %r', data)
+        return data
+
+    def write(self, data):
+        self.log.debug("tx =>: %r", data)
+        self.serial.write(data)
+

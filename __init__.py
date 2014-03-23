@@ -1,3 +1,2 @@
 
-from serial_driver import SerialHci
-from device_interface import DeviceInterface
+from device_interface import SerialHci
