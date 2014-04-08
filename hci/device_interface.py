@@ -5,14 +5,108 @@ import serial
 
 import protocol
 
-class DeviceInterface(threading.Thread):
-    def __init__(self, pkt_handler=None):
+class DeviceEventCallback():
+    def __init__(self, hcidev, classes=None, filter=None):
+        self.hcidev = hcidev
+        self.log = hcidev.log
+        if isinstance(classes, (list, tuple)):
+            self._classes = classes
+        elif classes == None:
+            self._classes = None
+        else:
+            self._classes = [classes]
+        self._filter = filter
+        self.events = Queue.Queue(maxsize=20)
+
+    def _isinstance_of_classes(self, event):
+        # if self._classes == None, allow any event
+        if self._classes == None:
+            return True
+        for _class in self._classes:
+            if isinstance(event, _class):
+                return True
+        return False
+
+    def _put_event(self, event):
+        if self.events.full():
+            dropped_event = self.event.get()
+            self.log.warn('Event queue for %s full, dropping oldest event %s',
+                    self, dropped_event)
+        self.events.put(event)
+
+    def process_event(self, event):
+        if self._isinstance_of_classes(event):
+            if self._filter and self._filter(event):
+                self._put_event(event)
+            elif not self._filter:
+                self.events.append(event)
+
+    def wait_for_event(self, timeout=1):
+        try:
+            return self.events.get(timeout=10)
+        except Queue.Empty:
+            return None
+
+    def append_as_listener(self):
+        self.hcidev.pkt_handlers.append(self.process_event)
+
+    def remove_as_listener(self):
+        self.hcidev.pkt_handlers.remove(self.process_event)
+
+    def __enter__(self):
+        self.append_as_listener()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.remove_as_listener()
+
+class DeviceInterface(object):
+    def __init__(self, device_name):
+        self.device_name = device_name
+        self.log = logging.getLogger(((8 - len(device_name)) * ' ' + device_name))
+        self.pkt_handlers = []
+
+    def process_event(self, event):
+        self.log.debug('dbg event %r', event)
+        # TODO: Deserialized log...
+        for fun in self.pkt_handlers:
+            fun(event)
+
+    def write_cmd(self, cmd):
+        classes = [protocol.HciCommandComplete, protocol.HciCommandStatus]
+        _filter = lambda x: x.commmand_op_code == cmd.op_code
+        with DeviceEventCallback(self, classes, _filter) as callback:
+            self.write(cmd.serialize())
+            cmd_resp = callback.wait_for_event()
+            self.log.debug('dbg %s %s', cmd, cmd_resp)
+
+    def write_data(self, conn_handle, data):
+        pkt = protocol.HciDataPkt(conn_handle, protocol.L2CapPkt(data))
+        self.write(pkt.serialize())
+
+    def write_data_wait_for_complete(self, conn_handle, data, timeout=10):
+        classes = [protocol.HciNumCompletePackets]
+        def _filter(num_complete_event):
+            for handle, num_completes in num_completes.handles:
+                if handle == conn_handle:
+                    return True
+            return False
+        with DeviceEventCallback(self, classes, _filter) as callback:
+            self.write_data(conn_handle, data)
+            data_rsp = callback.wait_for_event(timeout)
+            if data_rsp == None:
+                self.log.info('pkt %s, timeout waiting for hci data' % (pkt.__class__.__name__))
+        return data_rsp
+
+class SerialDevice(DeviceInterface, threading.Thread):
+    def __init__(self, port, baudrate=115200, rtscts=True):
         threading.Thread.__init__(self)
-        self.log = logging.getLogger('dev_if')
-        self.pkt_handler = pkt_handler
-        if self.pkt_handler == None:
-            self.pkt_queue = Queue.Queue()
+        DeviceInterface.__init__(self, port)
+        self.serial = serial.Serial(port=port, baudrate=baudrate, rtscts=rtscts, timeout=0.1)
+        self.log.debug("Opended port %s, baudrate %s, rtscts %s", port, baudrate, rtscts)
+
         self.keep_running = False
+        self.start()
 
     def stop(self):
         self.keep_running = False
@@ -24,80 +118,18 @@ class DeviceInterface(threading.Thread):
                 data = self.read()
                 if data == '': continue
 
-                pkt = protocol.event_factory(data)
-                if self.pkt_handler == None:
-                    self.pkt_queue.put(pkt)
-                else:
-                    self.pkt_handler(pkt)
+                event = None
+                try:
+                    event = protocol.event_factory(data)
+                except:
+                    self.log.exception("Unable to parse data %r", data)
+                if event != None: self.process_event(event)
         except:
             self.log.exception("Exception in read thread")
         finally:
             self.keep_running = False
             self.log.debug("Read thread finished")
 
-        self.close()
-
-    def _write(self, pkt):
-        if not self.keep_running:
-            return
-        self.write(pkt.serialize())
-
-    def write_data(self, conn_handle, data):
-        self._write(protocol.HciDataPkt(conn_handle, protocol.L2CapPkt(data)))
-        while True:
-            pkt = self.wait_for_pkt()
-
-            if pkt.__class__ == protocol.HciNumCompletePackets:
-                self.log.debug('data %s, pkt %r', data.__class__.__name__, pkt)
-                return pkt
-            if pkt == None:
-                self.log.info('data %s, timeout waiting for event', data.__class__.__name__)
-                return pkt
-            self.log.info('data %s, discarding unexpcted event %r', data.__class__.__name__, pkt)
-
-    def write_cmd(self, cmd):
-        self._write(cmd)
-        while True:
-            #if cmd.__class__ == protocol.HciLeCreateConnection:
-            #    self.log.debug('cmd %s, no cmd response', cmd.__class__.__name__)
-            #    return # TODO: Why do we get no CommandComplete or CommandStatus for this?
-
-            pkt = self.wait_for_pkt()
-
-            if pkt.__class__ == protocol.HciCommandComplete:
-                self.log.debug('cmd %s, pkt %r', cmd.__class__.__name__, pkt)
-                return pkt
-            if pkt.__class__ == protocol.HciCommandStatus:
-                self.log.debug('cmd %s, pkt %r', cmd.__class__.__name__, pkt)
-                return pkt
-            if pkt == None:
-                self.log.info('cmd %s, timeout waiting for event', cmd.__class__.__name__)
-                return pkt
-            self.log.info('cmd %s, discarding unexpcted event %r', cmd.__class__.__name__, pkt)
-
-    def wait_for_pkt(self, timeout = 1):
-        try:
-            return self.pkt_queue.get(True, timeout)
-        except Queue.Empty, ex:
-            return None
-
-    def close(self):
-        raise NotImplementedError()
-
-    def read(self):
-        raise NotImplementedError()
-
-    def write(self, data):
-        raise NotImplementedError()
-
-class SerialHci(DeviceInterface):
-    def __init__(self, port, baudrate=115200, rtscts=True, pkt_handler=None):
-        DeviceInterface.__init__(self, pkt_handler)
-        self.serial = serial.Serial(port=port, baudrate=baudrate, rtscts=rtscts, timeout=0.1)
-        self.log.debug("Opended port %s, baudrate %s, rtscts %s", port, baudrate, rtscts)
-        self.start()
-
-    def close(self):
         self.serial.close()
 
     def read(self):

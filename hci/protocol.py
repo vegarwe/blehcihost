@@ -615,6 +615,19 @@ class AdvReport(object):
                     ['length',                  1, None],
                     ['data',               (1, 9), None], # TODO: Find actual max size
                     ['rssi',                    1, None] ]
+    adv_types  = {'\x00': 'ADV_IND',
+                  '\x01': 'ADV_DIRECT_IND',
+                  '\x02': 'ADV_SCAN_IND',
+                  '\x03': 'ADV_NONCONN_IND',
+                  '\x04': 'SCAN_RESP'}
+    addr_types = {'\x00': 'public', '\x01': 'random'}
+
+    def get_addr_str(self):
+        addr_type = '%s' % self.addr_type
+        if self.addr_types.has_key(self.addr_type):
+            addr_type = self.addr_types[self.addr_type]
+        addr = ['%02x' % ord(i) for i in reversed(self.addr)]
+        return "['%02x', %r](%s)" % (ord(self.addr_type), ':'.join(addr), addr_type)
 
     def __init__(self, *args, **argv):
         self.fields = _parse_fields(self.class_descr, args, argv)
@@ -624,6 +637,14 @@ class AdvReport(object):
             if field[0] == name:
                 return field[1]
         raise AttributeError("'%s' object has no attribute '%s'" % (self.__class__.__name__, name))
+
+    def __str__(self):
+        adv_type = '%s' % self.event_type
+        if self.adv_types.has_key(self.event_type):
+            adv_type = self.adv_types[self.event_type]
+        return '%15s %s Rssi %s %r' % (
+                adv_type, self.get_addr_str(),
+                ord(self.rssi), self.data)
 
     def __repr__(self):
         tmp = ', '.join(['%s: %r' % (i[0], i[1]) for i in self.fields])
