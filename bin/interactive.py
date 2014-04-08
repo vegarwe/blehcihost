@@ -4,6 +4,7 @@ import sys, os
 sys.path.append(os.path.join(os.path.dirname(sys.argv[0]), '..'))
 
 import logging
+import struct
 import time
 from optparse import OptionParser
 
@@ -66,6 +67,20 @@ class Interactive(object):
         #    self.log.info('log %s', retval)
         #return retval
 
+    def read_local_version_information(self):
+        pass
+        #retval = self.hcidev.write_cmd(HciCommand.HciReadLocalVersionInformation())
+        #if not retval: return
+
+        #Params = [retval.Params[0],
+        #          retval.Params[1],
+        #          retval.Params[2] + retval.Params[3]*256,
+        #          retval.Params[4],
+        #          retval.Params[5] + retval.Params[6]*256,
+        #          retval.Params[7] + retval.Params[8]*256]
+        #self.log.info('log HciVersion 0x%02x, HciRev 0x%04x, LmpVer 0x%02x, Man.name 0x%04x, LmpSubVer 0x%04x',
+        #        Params[1], Params[2], Params[3], Params[4], Params[5])
+
     def __repr__(self):
         return '%s(%r)' % (self.__class__.__name__, self.hcidev)
 
@@ -90,44 +105,30 @@ class Master(Interactive):
         #self.slaves  = conn_db.ConnDb()
         #hcidev._pack_recipients.append(self.slaves.ProcessPacket) # TODO: Need to fix this
 
-    def read_local_version_information(self):
-        pass
-        #retval = self.hcidev.write_cmd(HciCommand.HciReadLocalVersionInformation())
-        #if not retval: return
-
-        #Params = [retval.Params[0],
-        #          retval.Params[1],
-        #          retval.Params[2] + retval.Params[3]*256,
-        #          retval.Params[4],
-        #          retval.Params[5] + retval.Params[6]*256,
-        #          retval.Params[7] + retval.Params[8]*256]
-        #self.log.info('log HciVersion 0x%02x, HciRev 0x%04x, LmpVer 0x%02x, Man.name 0x%04x, LmpSubVer 0x%04x',
-        #        Params[1], Params[2], Params[3], Params[4], Params[5])
-
-
     def start_scanner(self, timeout=1, active=False, interval=110, window=100, whitelist=None, filter_devices=False):
-        scan_type = 1 if active else 0
+        scan_type = '\x01' if active else '\x00'
         devices_seen = {}
 
-        filter_policy = 0
+        filter_policy = '\x00'
         self.hcidev.write_cmd(protocol.HciLeClearWhiteList())
         #if isinstance(whitelist, (list, tuple)) and len(whitelist) > 0:
-        #    filter_policy = 1
+        #    filter_policy = '\x01'
         #    for addr in whitelist:
-        #        retval = self.hcidev.write_cmd(
-        #                HciCommand.HciLeAddDeviceToWhiteList(addr[0], addr[1]))
+        #        #retval = self.hcidev.write_cmd(
+        #        #        protocol.HciLeAddDeviceToWhiteList(addr[0], addr[1]))
 
         classes = [protocol.HciLeAdvertisingReport]
         def _filter(event):
-            #if filter_devices and devices_seen.has_key(event.Reports[0].get_addr_str()):
-            #    return
-            #devices_seen[event.Reports[0].get_addr_str()] = event.Reports[0]
+            if filter_devices and devices_seen.has_key(str(event.reports[0].get_addr())):
+                return
+            devices_seen[str(event.reports[0].get_addr())] = event.reports[0]
             self.log.info('log %s', event.reports[0])
         with DeviceEventCallback(self.hcidev, classes, _filter) as callback:
             # Start scanning for adv packets
             self.hcidev.write_cmd(protocol.HciLeSetScanParametersCommand(
-                    #ScanType=scan_type, ScanInterval=interval, ScanWindow=window,
-                    #ScanningFilterPolicy=filter_policy
+                    scan_type=scan_type, scan_interval=struct.pack('H', interval),
+                    scan_window=struct.pack('H', window),
+                    scan_filter_policy=filter_policy
                     ))
             self.hcidev.write_cmd(protocol.HciLeSetScanEnable(scan_enable='\x01'))
 

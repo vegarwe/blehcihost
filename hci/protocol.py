@@ -2,33 +2,38 @@
 # BLUETOOTH SPECIFICATION Version 4.0 [Vol 2] page 15 of 1114
 # BLUETOOTH SPECIFICATION Version 4.0 [Vol 2] page 408 of 1114
 
-def _parse_fields(class_descr, args, argv):
-    # TODO: Verify size of field
-    fields =  []
-    for i in range(len(class_descr)):
-        attr = class_descr[i][0]
-        if i < len(args):
-            fields.append((attr, args[i]))
-        elif attr in argv:
-            fields.append((attr, argv[attr]))
-        else:
-            if class_descr[i][2] == None:
-                raise TypeError("__init__() takes at least %s arguments (%s given)" %
-                        (1+len(class_descr), 1 + len(args) + len(argv)))
-            fields.append((attr, class_descr[i][2]))
-    return fields
-
-class HciPkt(object):
-    def __init__(self, uart_type):
-        self.uart_type = uart_type
-
-class HciCommand(HciPkt):
-    op_code = '\x00\x00' # TODO: Find invalid op_code to put here
-    class_descr = []     # TODO: Is it OK to access this static array with self.class_descr in init?
+class DynamicObject(object):
+    class_descr    =  []
 
     def __init__(self, *args, **argv):
-        HciPkt.__init__(self, '\x01')
         self.fields = _parse_fields(self.class_descr, args, argv)
+
+    def _parse_fields(class_descr, args, argv):
+        # TODO: Verify size of field
+        fields =  []
+        for i in range(len(class_descr)):
+            attr = class_descr[i][0]
+            if i < len(args):
+                fields.append((attr, args[i]))
+            elif attr in argv:
+                fields.append((attr, argv[attr]))
+            else:
+                if class_descr[i][2] == None:
+                    raise TypeError("__init__() takes at least %s arguments (%s given)" %
+                            (1+len(class_descr), 1 + len(args) + len(argv)))
+                fields.append((attr, class_descr[i][2]))
+        return fields
+
+    def __getattr__(self, name):
+        for field in self.fields:
+            if field[0] == name:
+                return field[1]
+        raise AttributeError("'%s' object has no attribute '%s'" % (self.__class__.__name__, name))
+
+class HciCommand(DynamicObject):
+    uart_type      = '\x01'
+    op_code        = '\x00\x00' # TODO: Find invalid op_code to put here
+    class_descr    = []         # TODO: Is it OK to access this static array with self.class_descr in init?
 
     def serialize(self):
         data = ''
@@ -45,9 +50,10 @@ class HciCommand(HciPkt):
                     self.__class__.__name__, self.op_code,
                     ', '.join(['%s=%r' % (i[0], i[1]) for i in self.fields]))
 
-class HciDataPkt(HciPkt):
+class HciDataPkt(object):
+    uart_type      = '\x02'
+
     def __init__(self, conn_handle, payload_pkt, pb_flag='\x00', bc_flag='\x00'):
-        HciPkt.__init__(self, '\x02')
         self.conn_handle = conn_handle
         self.payload_pkt = payload_pkt
         self.pb_flag     = pb_flag
@@ -92,12 +98,9 @@ class L2CapPkt(object):
         return '%s(channel_id=%r, payload_pkt=%r)' % (self.__class__.__name__, self.channel_id, self.payload_pkt)
 
 ATT_MTU = 23
-class AttPkt(object):
+class AttPkt(DynamicObject):
     op_code = '\x00' # TODO: Find invalid op_code to put here
     class_descr = [] # TODO: Is it OK to access this static array with self.class_descr in init?
-
-    def __init__(self, *args, **argv):
-        self.fields = _parse_fields(self.class_descr, args, argv)
 
     def serialize(self):
         data = ''
@@ -112,12 +115,6 @@ class AttPkt(object):
             return '%s(op_code=%r, %s)' % (
                     self.__class__.__name__, self.op_code,
                     ', '.join(['%s=%r' % (i[0], i[1]) for i in self.fields]))
-
-    def __getattr__(self, name):
-        for field in self.fields:
-            if field[0] == name:
-                return field[1]
-        raise AttributeError("'%s' object has no attribute '%s'" % (self.__class__.__name__, name))
 
 class AttRequest(AttPkt):
     pass
@@ -147,19 +144,11 @@ class AttResponse(AttPkt):
 #                self.value.append(int(v))
 #
 
-class HciEvent(HciPkt):
+class HciEvent(DynamicObject):
+    uart_type      = '\x04'
     event_code     = '\x00' # TODO: Find invalid op_code to put here
     sub_event_code = ''
     class_descr    =  []    # TODO: Is it OK to access this static array with self.class_descr in init?
-    def __init__(self, *args, **argv):
-        HciPkt.__init__(self, '\x04')
-        self.fields = _parse_fields(self.class_descr, args, argv)
-
-    def __getattr__(self, name):
-        for field in self.fields:
-            if field[0] == name:
-                return field[1]
-        raise AttributeError("'%s' object has no attribute '%s'" % (self.__class__.__name__, name))
 
     def __repr__(self):
         sub = ''
@@ -608,7 +597,46 @@ class HciEncryptionKeyRefreshComplete(HciEvent):
     def deserialize(data):
         return HciEncryptionKeyRefreshComplete(data[5], data[6:8])
 
-class AdvReport(object):
+class DeviceAddress(DynamicObject):
+    class_descr = [ ['addr_type',               1, None],
+                    ['addr',                    6, None] ]
+    addr_types = {'\x00': 'public', '\x01': 'random'}
+
+    @staticmethod
+    def from_string(addr_string):
+        addr_string = addr_string.lstrip('[')
+        if addr_string.find('(') >= 0:
+            addr_string = addr_string[:addr_string.find('(')]
+        addr_string = addr_string.rstrip(']')
+        _type, tmp_addr = addr_string.split(',')
+        if _type == "'01'":
+            _type = '\x01'
+        else:
+            _type = '\x00'
+        tmp_addr = tmp_addr.strip(" '")
+        tmp_addr = ''.join([chr(int(i, 16)) for i in reversed(tmp_addr.split(':'))])
+        return DeviceAddress(_type, tmp_addr)
+
+    @staticmethod
+    def deserialize(data):
+        return DeviceAddress(data[1], data[2:8])
+
+    def __str__(self):
+        addr_type = '%s' % self.addr_type
+        if self.addr_types.has_key(self.addr_type):
+            addr_type = self.addr_types[self.addr_type]
+        addr = ['%02x' % ord(i) for i in reversed(self.addr)]
+        return "['%02x', %r](%s)" % (ord(self.addr_type), ':'.join(addr), addr_type)
+
+    def __eq__(self, other):
+        if self.addr_type != other.addr_type:
+            return False
+        return self.addr != other.addr
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+class AdvReport(DynamicObject):
     class_descr = [ ['event_type',              1, None],
                     ['addr_type',               1, None],
                     ['addr',                    6, None],
@@ -620,30 +648,16 @@ class AdvReport(object):
                   '\x02': 'ADV_SCAN_IND',
                   '\x03': 'ADV_NONCONN_IND',
                   '\x04': 'SCAN_RESP'}
-    addr_types = {'\x00': 'public', '\x01': 'random'}
 
-    def get_addr_str(self):
-        addr_type = '%s' % self.addr_type
-        if self.addr_types.has_key(self.addr_type):
-            addr_type = self.addr_types[self.addr_type]
-        addr = ['%02x' % ord(i) for i in reversed(self.addr)]
-        return "['%02x', %r](%s)" % (ord(self.addr_type), ':'.join(addr), addr_type)
-
-    def __init__(self, *args, **argv):
-        self.fields = _parse_fields(self.class_descr, args, argv)
-
-    def __getattr__(self, name):
-        for field in self.fields:
-            if field[0] == name:
-                return field[1]
-        raise AttributeError("'%s' object has no attribute '%s'" % (self.__class__.__name__, name))
+    def get_addr(self):
+        return DeviceAddress(self.addr_type, self.addr)
 
     def __str__(self):
         adv_type = '%s' % self.event_type
         if self.adv_types.has_key(self.event_type):
             adv_type = self.adv_types[self.event_type]
         return '%15s %s Rssi %s %r' % (
-                adv_type, self.get_addr_str(),
+                adv_type, self.get_addr(),
                 ord(self.rssi), self.data)
 
     def __repr__(self):
