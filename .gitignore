@@ -3,3 +3,4 @@
 *.swo
 tmp
 uart_log.txt
+_interactive.*
