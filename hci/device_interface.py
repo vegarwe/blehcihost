@@ -39,7 +39,7 @@ class DeviceEventCallback():
             if self._filter and self._filter(event):
                 self._put_event(event)
             elif not self._filter:
-                self.events.append(event)
+                self._put_event(event)
 
     def wait_for_event(self, timeout=1):
         try:

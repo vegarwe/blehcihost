@@ -6,22 +6,22 @@ class DynamicObject(object):
     class_descr    =  []
 
     def __init__(self, *args, **argv):
-        self.fields = _parse_fields(self.class_descr, args, argv)
+        self.fields = self._parse_fields(args, argv)
 
-    def _parse_fields(class_descr, args, argv):
+    def _parse_fields(self, args, argv):
         # TODO: Verify size of field
         fields =  []
-        for i in range(len(class_descr)):
-            attr = class_descr[i][0]
+        for i in range(len(self.class_descr)):
+            attr = self.class_descr[i][0]
             if i < len(args):
                 fields.append((attr, args[i]))
             elif attr in argv:
                 fields.append((attr, argv[attr]))
             else:
-                if class_descr[i][2] == None:
+                if self.class_descr[i][2] == None:
                     raise TypeError("__init__() takes at least %s arguments (%s given)" %
-                            (1+len(class_descr), 1 + len(args) + len(argv)))
-                fields.append((attr, class_descr[i][2]))
+                            (1+len(self.class_descr), 1 + len(args) + len(argv)))
+                fields.append((attr, self.class_descr[i][2]))
         return fields
 
     def __getattr__(self, name):
@@ -597,45 +597,6 @@ class HciEncryptionKeyRefreshComplete(HciEvent):
     def deserialize(data):
         return HciEncryptionKeyRefreshComplete(data[5], data[6:8])
 
-class DeviceAddress(DynamicObject):
-    class_descr = [ ['addr_type',               1, None],
-                    ['addr',                    6, None] ]
-    addr_types = {'\x00': 'public', '\x01': 'random'}
-
-    @staticmethod
-    def from_string(addr_string):
-        addr_string = addr_string.lstrip('[')
-        if addr_string.find('(') >= 0:
-            addr_string = addr_string[:addr_string.find('(')]
-        addr_string = addr_string.rstrip(']')
-        _type, tmp_addr = addr_string.split(',')
-        if _type == "'01'":
-            _type = '\x01'
-        else:
-            _type = '\x00'
-        tmp_addr = tmp_addr.strip(" '")
-        tmp_addr = ''.join([chr(int(i, 16)) for i in reversed(tmp_addr.split(':'))])
-        return DeviceAddress(_type, tmp_addr)
-
-    @staticmethod
-    def deserialize(data):
-        return DeviceAddress(data[1], data[2:8])
-
-    def __str__(self):
-        addr_type = '%s' % self.addr_type
-        if self.addr_types.has_key(self.addr_type):
-            addr_type = self.addr_types[self.addr_type]
-        addr = ['%02x' % ord(i) for i in reversed(self.addr)]
-        return "['%02x', %r](%s)" % (ord(self.addr_type), ':'.join(addr), addr_type)
-
-    def __eq__(self, other):
-        if self.addr_type != other.addr_type:
-            return False
-        return self.addr != other.addr
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
 class AdvReport(DynamicObject):
     class_descr = [ ['event_type',              1, None],
                     ['addr_type',               1, None],
@@ -649,15 +610,12 @@ class AdvReport(DynamicObject):
                   '\x03': 'ADV_NONCONN_IND',
                   '\x04': 'SCAN_RESP'}
 
-    def get_addr(self):
-        return DeviceAddress(self.addr_type, self.addr)
-
     def __str__(self):
         adv_type = '%s' % self.event_type
         if self.adv_types.has_key(self.event_type):
             adv_type = self.adv_types[self.event_type]
-        return '%15s %s Rssi %s %r' % (
-                adv_type, self.get_addr(),
+        return '%15s [%r %r] Rssi %s %r' % (
+                adv_type, self.addr_type, self.addr,
                 ord(self.rssi), self.data)
 
     def __repr__(self):

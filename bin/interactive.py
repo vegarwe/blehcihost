@@ -9,6 +9,7 @@ import time
 from optparse import OptionParser
 
 from hci import protocol, SerialDevice, DeviceEventCallback
+from api import gap
 
 LOGFILE_PREFIX = '_interactive'
 
@@ -104,10 +105,17 @@ class Master(Interactive):
         Interactive.__init__(self, hcidev)
         #self.slaves  = conn_db.ConnDb()
         #hcidev._pack_recipients.append(self.slaves.ProcessPacket) # TODO: Need to fix this
+        self.devices = []
+
+    def add_devices_if_new(self, device):
+        for d in self.devices:
+            if d.get_addr() == device.get_addr():
+                return
+        self.devices.append(device)
 
     def start_scanner(self, timeout=1, active=False, interval=110, window=100, whitelist=None, filter_devices=False):
         scan_type = '\x01' if active else '\x00'
-        devices_seen = {}
+        seen_devices = {}
 
         filter_policy = '\x00'
         self.hcidev.write_cmd(protocol.HciLeClearWhiteList())
@@ -119,10 +127,12 @@ class Master(Interactive):
 
         classes = [protocol.HciLeAdvertisingReport]
         def _filter(event):
-            if filter_devices and devices_seen.has_key(str(event.reports[0].get_addr())):
+            device = gap.Device.from_adv_report(self.hcidev, event.reports[0])
+            self.add_devices_if_new(device)
+            if filter_devices and seen_devices.has_key(device.get_addr()):
                 return
-            devices_seen[str(event.reports[0].get_addr())] = event.reports[0]
-            self.log.info('log %s', event.reports[0])
+            seen_devices[device.get_addr()] = device
+            self.log.info('log %s', device)
         with DeviceEventCallback(self.hcidev, classes, _filter) as callback:
             # Start scanning for adv packets
             self.hcidev.write_cmd(protocol.HciLeSetScanParametersCommand(
@@ -164,13 +174,17 @@ class Master(Interactive):
         return '%s(%r)' % (self.__class__.__name__, self.hcidev)
 
 logger = None
-def setup_logger():
+def setup_logger(options):
     global logger
     if logger != None: return # Only configure logging once
 
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
     logger.addHandler(logging.StreamHandler())
+
+    if options.verbose:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
 
     #from hci import btsnoop
     #btsnoop.init_hci_log(LOGFILE_PREFIX)
@@ -222,9 +236,10 @@ if __name__ == '__main__':
     parser.add_option("-b", "--baudrate",     dest="baudrate", default='1000000',                  help="Baud rate")
     parser.add_option("-t", "--type",         dest="type",     default='master',                   help='Interactive device type')
     parser.add_option("-s", "--script",       dest="script",   default=None,                       help='Stub script to run')
+    parser.add_option("-v", "--verbose",      dest="verbose",  default=False, action="store_true", help='Verbose')
     (options, args) = parser.parse_args()
 
-    setup_logger()
+    setup_logger(options)
 
     if options.script == None:
         start_ipython(options, args)
