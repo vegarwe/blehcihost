@@ -11,6 +11,7 @@ class Device(object):
         self.addr        = addr
         self.addr_type   = addr_type
         self.device_name = device_name
+        self.conn_handle = None
 
     def get_addr(self):
         return "%s(%s)" % (self.addr, self.addr_type)
@@ -37,8 +38,16 @@ class Device(object):
                 conn_resp = callback.wait_for_event()
                 self.log.debug('log %s %r', conn_resp, conn_resp)
                 return
-            self.log.info('log Connected to %s, conn_handle %s',
-                    self.get_addr(), conn_resp.conn_handle)
+            self.log.info('log Connected to %s', self.get_addr())
+
+    def is_connected(self):
+        return self.conn_handle != None
+
+    def disconnect(self):
+        with DeviceEventCallback(self.hcidev, protocol.HciDisconnectionComplete) as callback:
+            self.hcidev.write_cmd(protocol.HciDisconnect(conn_handle=self.conn_handle))
+            cmd_resp = callback.wait_for_event()
+            self.log.info('Disconnected %s', self)
 
     def __str__(self):
         if self.device_name:
@@ -52,12 +61,27 @@ class Device(object):
         return "%s(%s, '%s', '%s', '%s')" % ( self.__class__.__name__,
                 self.hcidev, self.addr, self.addr_type, self.device_name)
 
+    def process_event(self, event):
+        if isinstance(event, protocol.HciLeConnectionComplete):
+            self.conn_handle = event.conn_handle
+        if isinstance(event, protocol.HciDisconnectionComplete):
+            self.conn_handle = None
+
     @staticmethod
     def from_adv_report(hcidev, event):
         addr_type = Device.addr_types[event.addr_type]
         addr = ':'.join(['%02x' % ord(i) for i in reversed(event.addr)])
         # TODO: Parse adv data for device name
         return Device(hcidev, addr, addr_type)
+
+    @staticmethod
+    def from_connected_event(hcidev, event):
+        addr_type = Device.addr_types[event.peer_addr_type]
+        addr      = ':'.join(['%02x' % ord(i) for i in reversed(event.peer_addr)])
+
+        device             = Device(hcidev, addr, addr_type)
+        device.conn_handle = event.conn_handle
+        return device
 
     #@staticmethod
     #def from_addr(addr_string):
@@ -73,4 +97,74 @@ class Device(object):
     #    tmp_addr = tmp_addr.strip(" '")
     #    tmp_addr = ''.join([chr(int(i, 16)) for i in reversed(tmp_addr.split(':'))])
     #    return Device(tmp_addr, _type)
+
+class DeviceDb(object):
+    def __init__(self, hcidev, devices=None):
+        self.hcidev = hcidev
+        self.log    = hcidev.log
+        if devices == None:
+            self._devices = []
+        else:
+            self._devices = devices
+
+    def add_device_if_new(self, device):
+        for d in self._devices:
+            if d.get_addr() == device.get_addr():
+                return
+        self._devices.append(device)
+
+    #def __repr__(self):
+    #    if len(self._devices) > 0:
+    #        return "%s([%s])" % (self.__class__.__name__, ''.join(['\n  %r' % i for i in self._devices]))
+    #    else:
+    #        return "%s(%r)" % (self.__class__.__name__, self._devices)
+
+    def __iter__(self):
+        for conn in self._devices[:]:
+            yield conn
+
+    def __getitem__(self, idx):
+        return self._devices[idx]
+
+    def __len__(self):
+        return len(self._devices)
+
+    #def GetDb(self):
+    #    return self._devices[:]
+
+    def process_event(self, event):
+        if isinstance(event, protocol.HciLeAdvertisingReport):
+            self.log.debug('event %r', event)
+            device = Device.from_adv_report(self.hcidev, event.reports[0])
+            self.add_device_if_new(device)
+
+        if isinstance(event, protocol.HciLeConnectionComplete):
+            self.log.debug('event %r', event)
+            if event.status == '\x00':
+                device = Device.from_connected_event(self.hcidev, event)
+                matching_devices = [d for d in self._devices if d.get_addr() == device.get_addr()]
+                if matching_devices:
+                    matching_devices[0].process_event(event)
+                else:
+                    self.add_device_if_new(device)
+
+        if isinstance(event, protocol.HciDisconnectionComplete):
+            self.log.debug('event %r', event)
+            for entry in self._devices:
+                for d in self._devices:
+                    if d.conn_handle == event.conn_handle:
+                        d.process_event(event)
+
+        if isinstance(event, protocol.HciCommandComplete):
+            if event.command_op_code == 0x0c03 and event.Status == 0x00:
+                self._devices[:] = []
+
+        #if isinstance(event, protocol.HciLeConnectionUpdateComplete):
+        #    for entry in self._devices:
+        #        if event.ConnectionHandle == entry.conn_handle:
+        #            entry.update_conn_params(event)
+        #if isinstance(event, protocol.HciEncryptionChange):
+        #    for entry in self._devices:
+        #        if event.ConnectionHandle == entry.conn_handle:
+        #            entry.update_enc_status(event)
 

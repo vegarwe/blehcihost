@@ -18,11 +18,9 @@ class Interactive(object):
     def __init__(self, hcidev):
         self.hcidev = hcidev
         self.log    = hcidev.log
+        self.hci_reset_ok = False
 
         self._interactive_sessions.append(self)
-
-    def reset(self):
-        self.hcidev.write_cmd(protocol.HciReset())
 
     def close(self):
         try:
@@ -35,9 +33,11 @@ class Interactive(object):
 
     def reset_and_setup(self):
         result = self.hcidev.write_cmd(protocol.HciReset())
+        self.log.info('result %s %r', result, result)
         if not result or result.status != '\x00':
             self.log.error('Unable to reset device')
             return
+        self.hci_reset_ok = True
 
         dev_addr = self.hcidev.write_cmd(protocol.HciReadPublicDeviceAddress())
         self.log.info('log Public device address: %r', dev_addr.return_params[::-1])
@@ -103,15 +103,8 @@ class Slave(Interactive):
 class Master(Interactive):
     def __init__(self, hcidev):
         Interactive.__init__(self, hcidev)
-        #self.slaves  = conn_db.ConnDb()
-        #hcidev._pack_recipients.append(self.slaves.ProcessPacket) # TODO: Need to fix this
-        self.devices = []
-
-    def add_devices_if_new(self, device):
-        for d in self.devices:
-            if d.get_addr() == device.get_addr():
-                return
-        self.devices.append(device)
+        self.devices = gap.DeviceDb(hcidev)
+        self.hcidev.pkt_handlers.append(self.devices.process_event)  # TODO: Need to fix this
 
     def start_scanner(self, timeout=1, active=False, interval=110, window=100, whitelist=None, filter_devices=False):
         scan_type = '\x01' if active else '\x00'
@@ -128,7 +121,6 @@ class Master(Interactive):
         classes = [protocol.HciLeAdvertisingReport]
         def _filter(event):
             device = gap.Device.from_adv_report(self.hcidev, event.reports[0])
-            self.add_devices_if_new(device)
             if filter_devices and seen_devices.has_key(device.get_addr()):
                 return
             seen_devices[device.get_addr()] = device
@@ -147,27 +139,10 @@ class Master(Interactive):
 
             self.hcidev.write_cmd(protocol.HciLeSetScanEnable(scan_enable='\x00'))
 
-    def connect_slaves(self, addresses = None, timeout=1, whitelist=None, interval=40, latency=0, scan_interval=80):
-        pass
-
-    def disconnect_slaves(self, conn_handles = None):
-        pass
-        #if conn_handles == None:
-        #    conn_handles = self.slaves
-        #if len(conn_handles) == 0:
-        #    return
-        #self.log.info('log Disconnecting handles %r', [i for i in conn_handles])
-        #with Blipp(self.hcidev, HciEvent.HciDisconnectionComplete) as blipp:
-        #    for conn_handle in conn_handles:
-        #        if not conn_handle in self.slaves:
-        #            self.log.error('Provided conn_handle not part of conn_db')
-        #            continue
-        #        self.hcidev.write_cmd(HciCommand.HciDisconnect(ConnectionHandle=conn_handle))
-        #        retval = blipp.Wait()
-        #        self.log.info('Disconnected handle 0x%04x', conn_handle)
-
     def close(self):
-        self.disconnect_slaves()
+        for device in self.devices:
+            if device.is_connected():
+                device.disconnect()
         Interactive.close(self)
 
     def __repr__(self):
@@ -222,9 +197,18 @@ def start_ipython(options, args):
     raise SystemExit(0)
 
 def start_script(options, args):
-    d = get_device(options)
+    if not os.path.isfile(options.script):
+        logger.error('Script file "%s" not found', options.script)
+        return
 
-    execfile(options.script)
+    d = get_device(options)
+    d.reset_and_setup()
+
+    try:
+        execfile(options.script)
+    except:
+        import traceback
+        traceback.print_exc()
 
     for i in Interactive._interactive_sessions[:]:
         i.close()

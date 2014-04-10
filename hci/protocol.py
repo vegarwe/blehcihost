@@ -554,7 +554,7 @@ class HciReadRemoteVersionInformationComplete(HciEvent):
 class HciCommandComplete(HciEvent):
     event_code = '\x0e'
     class_descr = [ ['num_hci_cmd_pkt',         1, None],
-                    ['commmand_op_code',        2, None],
+                    ['command_op_code',         2, None],
                     ['status',                  1, None],
                     ['return_params',      (0, 9), None] ] # TODO: Find actual max limit here
 
@@ -569,7 +569,7 @@ class HciCommandStatus(HciEvent):
     event_code = '\x0f'
     class_descr = [ ['status',                  1, None],
                     ['num_hci_cmd_pkt',         1, None],
-                    ['commmand_op_code',        2, None] ]
+                    ['command_op_code',         2, None] ]
 
     @staticmethod
     def deserialize(data):

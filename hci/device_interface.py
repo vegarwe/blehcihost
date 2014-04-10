@@ -74,11 +74,12 @@ class DeviceInterface(object):
 
     def write_cmd(self, cmd):
         classes = [protocol.HciCommandComplete, protocol.HciCommandStatus]
-        _filter = lambda x: x.commmand_op_code == cmd.op_code
+        _filter = lambda x: x.command_op_code == cmd.op_code
         with DeviceEventCallback(self, classes, _filter) as callback:
             self.write(cmd.serialize())
             cmd_resp = callback.wait_for_event()
             self.log.debug('dbg %s %s', cmd, cmd_resp)
+        return cmd_resp
 
     def write_data(self, conn_handle, data):
         pkt = protocol.HciDataPkt(conn_handle, protocol.L2CapPkt(data))
