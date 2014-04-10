@@ -69,7 +69,8 @@ class HciDataPkt(object):
     @staticmethod
     def deserialize(data):
         hci_data = data[2:9]
-        print 'todo: hci_data %r' % (hci_data)
+        # TODO: Not finished yet
+        #print 'todo: hci_data %r' % (hci_data)
         return HciDataPkt('\xff\xfe', L2CapPkt.deserialize(data[9:]))
 
     def __repr__(self):

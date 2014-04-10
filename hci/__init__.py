@@ -1,3 +1,3 @@
 
-from device_interface import SerialDevice
-from device_interface import DeviceEventCallback
+from device_interface import SerialHci
+from device_interface import HciEventCallback

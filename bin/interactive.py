@@ -8,7 +8,7 @@ import struct
 import time
 from optparse import OptionParser
 
-from hci import protocol, SerialDevice, DeviceEventCallback
+from hci import protocol, SerialHci, HciEventCallback
 from api import gap
 
 LOGFILE_PREFIX = '_interactive'
@@ -125,7 +125,7 @@ class Master(Interactive):
                 return
             seen_devices[device.get_addr()] = device
             self.log.info('log %s', device)
-        with DeviceEventCallback(self.hcidev, classes, _filter) as callback:
+        with HciEventCallback(self.hcidev, classes, _filter) as callback:
             # Start scanning for adv packets
             self.hcidev.write_cmd(protocol.HciLeSetScanParametersCommand(
                     scan_type=scan_type, scan_interval=struct.pack('H', interval),
@@ -176,7 +176,7 @@ def _get_ipython_config():
 
 def get_device(options):
     if options.type == 'master':
-        d = Master(SerialDevice(options.device, baudrate=options.baudrate))
+        d = Master(SerialHci(options.device, baudrate=options.baudrate))
     #else:
     #    d = Slave(HciUart(options.device, baudrate=options.baudrate))
 
@@ -191,8 +191,6 @@ def start_ipython(options, args):
 
     IPython.embed(config=_get_ipython_config())
     for i in Interactive._interactive_sessions[:]:
-        print 'i', i
-        i.log.info('b')
         i.close()
     raise SystemExit(0)
 
@@ -202,6 +200,7 @@ def start_script(options, args):
         return
 
     d = get_device(options)
+    logger.info('d %s', d)
     d.reset_and_setup()
 
     try:
