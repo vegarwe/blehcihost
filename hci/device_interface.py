@@ -5,7 +5,7 @@ import serial
 
 import protocol
 
-class DeviceEventCallback():
+class HciEventCallback():
     def __init__(self, hcidev, classes=None, filter=None):
         self.hcidev = hcidev
         self.log = hcidev.log
@@ -60,7 +60,7 @@ class DeviceEventCallback():
     def __exit__(self, type, value, traceback):
         self.remove_as_listener()
 
-class DeviceInterface(object):
+class HciInterface(object):
     def __init__(self, device_name):
         self.device_name = device_name
         self.log = logging.getLogger(((8 - len(device_name)) * ' ' + device_name))
@@ -75,7 +75,7 @@ class DeviceInterface(object):
     def write_cmd(self, cmd):
         classes = [protocol.HciCommandComplete, protocol.HciCommandStatus]
         _filter = lambda x: x.command_op_code == cmd.op_code
-        with DeviceEventCallback(self, classes, _filter) as callback:
+        with HciEventCallback(self, classes, _filter) as callback:
             self.write(cmd.serialize())
             cmd_resp = callback.wait_for_event()
             self.log.debug('dbg %s %s', cmd, cmd_resp)
@@ -92,17 +92,17 @@ class DeviceInterface(object):
                 if handle == conn_handle:
                     return True
             return False
-        with DeviceEventCallback(self, classes, _filter) as callback:
+        with HciEventCallback(self, classes, _filter) as callback:
             self.write_data(conn_handle, data)
             data_rsp = callback.wait_for_event(timeout)
             if data_rsp == None:
                 self.log.info('pkt %s, timeout waiting for hci data' % (pkt.__class__.__name__))
         return data_rsp
 
-class SerialDevice(DeviceInterface, threading.Thread):
+class SerialHci(HciInterface, threading.Thread):
     def __init__(self, port, baudrate=115200, rtscts=True):
         threading.Thread.__init__(self)
-        DeviceInterface.__init__(self, port)
+        HciInterface.__init__(self, port)
         self.serial = serial.Serial(port=port, baudrate=baudrate, rtscts=rtscts, timeout=0.1)
         self.log.debug("Opended port %s, baudrate %s, rtscts %s", port, baudrate, rtscts)
 
@@ -157,3 +157,5 @@ class SerialDevice(DeviceInterface, threading.Thread):
         self.log.debug("tx =>: %r", data)
         self.serial.write(data)
 
+    def __repr__(self):
+        return '%s(port="%s", baudrate=%s)' % (self.__class__.__name__, self.serial.port, self.serial.baudrate)
